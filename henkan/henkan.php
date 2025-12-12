@@ -97,12 +97,15 @@ function henkan_enqueue_admin( $hook ) {
 // -----------------------------------------------------------------------
 if ( file_exists( plugin_dir_path( __FILE__ ) . 'plugin-update-checker/plugin-update-checker.php' ) ) {
     require 'plugin-update-checker/plugin-update-checker.php';
+    
+    // Verwende v5 Namespace Syntax
     $myUpdateChecker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
         'https://github.com/Suzu-chan1990/henkan-wordpress-plugin',
         __FILE__,
         'henkan'
     );
 
-    // Force updater to use the ZIP asset from the release
+    // WICHTIG: Erzwingt die Nutzung der ZIP aus den Release-Assets
+    // Dies verhindert den "No valid plugins found" Fehler!
     $myUpdateChecker->getVcsApi()->enableReleaseAssets();
 }

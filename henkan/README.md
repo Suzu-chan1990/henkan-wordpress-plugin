@@ -42,7 +42,7 @@ Unlike simple converters, Henkan offers a robust set of tools including a smart 
 
 = 1.7 =
 * Final compliance fixes for WordPress.org standards.
-* Improved GitHub Updater integration.
+* Improved GitHub Updater integration (Release Assets support).
 
 = 1.6 =
 * Added WP-CLI support.
