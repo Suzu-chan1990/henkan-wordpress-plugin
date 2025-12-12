@@ -15,7 +15,38 @@ add_action( 'admin_init', function() {
     register_setting( 'henkan_settings_group', 'henkan_settings', 'henkan_sanitize_settings' );
 });
 
-// --- NEW V1.8: Dashboard Widget ---
+// --- V1.9: Media Library Column ---
+add_filter( 'manage_media_columns', 'henkan_add_media_column' );
+function henkan_add_media_column( $columns ) {
+    $columns['henkan_status'] = __( 'Henkan', 'henkan' );
+    return $columns;
+}
+
+add_action( 'manage_media_custom_column', 'henkan_media_custom_column_content', 10, 2 );
+function henkan_media_custom_column_content( $column_name, $id ) {
+    if ( 'henkan_status' !== $column_name ) {
+        return;
+    }
+
+    $mime = get_post_mime_type( $id );
+    if ( ! in_array( $mime, [ 'image/jpeg', 'image/png' ] ) ) {
+        echo '<span style="color:#ccc;">—</span>';
+        return;
+    }
+
+    $meta = get_post_meta( $id, '_henkan_converted_files', true );
+    
+    if ( ! empty( $meta ) ) {
+        // Optimized
+        echo '<span class="dashicons dashicons-yes" style="color:#46b450;"></span> <span style="color:#46b450; font-weight:bold;">OK</span>';
+    } else {
+        // Not optimized
+        echo '<button type="button" class="button button-small henkan-quick-convert" data-id="' . esc_attr( $id ) . '">' . esc_html__( 'Optimieren', 'henkan' ) . '</button>';
+        echo '<span class="henkan-spinner spinner" style="float:none; margin-top:0;"></span>';
+    }
+}
+
+// --- V1.8: Dashboard Widget ---
 add_action( 'wp_dashboard_setup', 'henkan_add_dashboard_widgets' );
 function henkan_add_dashboard_widgets() {
     wp_add_dashboard_widget(
@@ -44,7 +75,7 @@ function henkan_dashboard_widget_content() {
     echo '<p style="text-align:right; margin-top:10px;"><a href="' . esc_url( admin_url( 'options-general.php?page=henkan-settings' ) ) . '" class="button button-small">' . esc_html__( 'Zum Konverter', 'henkan' ) . '</a></p>';
 }
 
-// --- NEW V1.8: Admin Bar Menu ---
+// --- V1.8: Admin Bar Menu ---
 add_action( 'admin_bar_menu', 'henkan_admin_bar_menu', 99 );
 function henkan_admin_bar_menu( $wp_admin_bar ) {
     if ( ! current_user_can( 'manage_options' ) ) return;
@@ -157,7 +188,7 @@ function henkan_admin_page() {
     <div class="wrap henkan-wrap">
         <div class="henkan-header">
             <div class="header-title">
-                <h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v1.8</span></h1>
+                <h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v1.9</span></h1>
             </div>
             <div class="header-branding">
                 <span class="dashicons dashicons-format-image" style="font-size:40px; width:40px; height:40px; color:#ccc;"></span>

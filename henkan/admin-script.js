@@ -1,5 +1,6 @@
 
 jQuery(document).ready(function($) {
+    // Existing Tabs Logic
     $('.henkan-tab-btn').on('click', function() {
         $('.henkan-tab-btn').removeClass('active');
         $(this).addClass('active');
@@ -7,6 +8,36 @@ jQuery(document).ready(function($) {
         $('#tab-' + $(this).data('target')).show();
     });
 
+    // --- NEW V1.9: Media Library Button Handler ---
+    $(document).on('click', '.henkan-quick-convert', function(e) {
+        e.preventDefault();
+        const btn = $(this);
+        const spinner = btn.next('.henkan-spinner');
+        const id = btn.data('id');
+
+        btn.hide();
+        spinner.addClass('is-active');
+
+        $.post(henkan_ajax.ajax_url, {
+            action: 'henkan_convert',
+            nonce: henkan_ajax.nonce_convert,
+            item: id
+        }, function(res) {
+            spinner.removeClass('is-active');
+            if(res.success) {
+                btn.parent().html('<span class="dashicons dashicons-yes" style="color:#46b450;"></span> <span style="color:#46b450; font-weight:bold;">OK</span>');
+            } else {
+                btn.show().text('Retry');
+                alert(res.data.msg || 'Error');
+            }
+        }).fail(function() {
+            spinner.removeClass('is-active');
+            btn.show();
+            alert('Server Error');
+        });
+    });
+
+    // Bulk Process Logic (Unchanged)
     let todoList = [];
     let totalTodo = 0;
 
@@ -30,23 +61,29 @@ jQuery(document).ready(function($) {
 
                 todoList = res.data.items;
                 totalTodo = todoList.length;
+                
                 $('#henkan_total_found').text(res.data.total_scanned);
                 $('#henkan_to_convert').text(totalTodo);
                 $('#henkan_scan_results').slideDown();
-                btn.text('Scan abgeschlossen').prop('disabled', false);
-                $('#henkan_log_list').prepend('<li>Scan abgeschlossen: ' + totalTodo + ' Dateien.</li>');
+                btn.text(henkan_ajax.i18n.starting).hide();
+                
+                if(totalTodo === 0) {
+                    $('#henkan_status_text').text(henkan_ajax.i18n.done);
+                }
+            } else {
+                alert(res.data.msg || henkan_ajax.i18n.error);
+                btn.prop('disabled', false).text('Scan starten');
             }
         });
     });
 
-    $('#henkan_start_convert').click(function(e) {
-        e.preventDefault();
+    $('#henkan_start_convert').click(function() {
         $(this).hide();
-        $('#henkan_progress_ui').slideDown();
-        processNext();
+        $('#henkan_progress_ui').show();
+        processNextBatch();
     });
 
-    function processNext() {
+    function processNextBatch() {
         if(todoList.length === 0) {
             $('#henkan_status_text').text(henkan_ajax.i18n.done);
             $('.fill').css('width', '100%');
@@ -75,12 +112,12 @@ jQuery(document).ready(function($) {
             if(res.success) {
                 $('#henkan_log_list').prepend('<li>' + res.data.msg + '</li>');
             } else {
-                $('#henkan_log_list').prepend('<li style="color:red">Fehler: ' + res.data.msg + '</li>');
+                $('#henkan_log_list').prepend('<li style="color:red">Error: ' + res.data.msg + '</li>');
             }
-            processNext();
+            processNextBatch();
         }).fail(function() {
-            $('#henkan_log_list').prepend('<li style="color:red">Netzwerkfehler</li>');
-            processNext();
+            $('#henkan_log_list').prepend('<li style="color:red">Server Error</li>');
+            processNextBatch();
         });
     }
 });
