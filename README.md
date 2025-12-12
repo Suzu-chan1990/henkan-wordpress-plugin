@@ -1,5 +1,3 @@
-Henkan is a professional, lightweight image optimization plugin that converts images to WebP and AVIF.
-
 == Description ==
 
 Henkan is a professional, lightweight image optimization plugin for WordPress. It automatically converts your images to modern formats (**WebP** and **AVIF**) to improve page load speeds and Core Web Vitals scores.
