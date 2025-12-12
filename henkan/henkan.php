@@ -97,7 +97,7 @@ function henkan_enqueue_admin( $hook ) {
 // -----------------------------------------------------------------------
 if ( file_exists( plugin_dir_path( __FILE__ ) . 'plugin-update-checker/plugin-update-checker.php' ) ) {
     require 'plugin-update-checker/plugin-update-checker.php';
-    $myUpdateChecker = Puc_v4_Factory::buildUpdateChecker(
+    $myUpdateChecker = YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
         'https://github.com/Suzu-chan1990/henkan-wordpress-plugin',
         __FILE__,
         'henkan'
