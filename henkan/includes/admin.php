@@ -15,6 +15,54 @@ add_action( 'admin_init', function() {
     register_setting( 'henkan_settings_group', 'henkan_settings', 'henkan_sanitize_settings' );
 });
 
+// --- NEW V1.8: Dashboard Widget ---
+add_action( 'wp_dashboard_setup', 'henkan_add_dashboard_widgets' );
+function henkan_add_dashboard_widgets() {
+    wp_add_dashboard_widget(
+        'henkan_dashboard_widget',
+        __( 'Henkan Status', 'henkan' ),
+        'henkan_dashboard_widget_content'
+    );
+}
+
+function henkan_dashboard_widget_content() {
+    $stats = henkan_get_stats();
+    echo '<div class="henkan-dashboard-widget" style="display:flex; gap:20px; align-items:center;">';
+    echo '<div style="text-align:center;">';
+    echo '<span class="dashicons dashicons-format-image" style="font-size:32px; height:32px; width:32px; color:#2271b1;"></span>';
+    echo '</div>';
+    echo '<div>';
+    echo '<p style="margin:0 0 5px;"><strong>' . esc_html( $stats['percent'] ) . '%</strong> ' . esc_html__( 'Optimiert', 'henkan' ) . '</p>';
+    echo '<div style="background:#eee; border-radius:5px; width:150px; height:10px; overflow:hidden;">';
+    echo '<div style="background:#46b450; height:100%; width:' . esc_attr( $stats['percent'] ) . '%"></div>';
+    echo '</div>';
+    echo '<p style="margin:5px 0 0; font-size:11px; color:#666;">';
+    printf( esc_html__( '%s von %s Bildern optimiert.', 'henkan' ), '<strong>' . intval( $stats['converted'] ) . '</strong>', intval( $stats['total'] ) );
+    echo '</p>';
+    echo '</div>';
+    echo '</div>';
+    echo '<p style="text-align:right; margin-top:10px;"><a href="' . esc_url( admin_url( 'options-general.php?page=henkan-settings' ) ) . '" class="button button-small">' . esc_html__( 'Zum Konverter', 'henkan' ) . '</a></p>';
+}
+
+// --- NEW V1.8: Admin Bar Menu ---
+add_action( 'admin_bar_menu', 'henkan_admin_bar_menu', 99 );
+function henkan_admin_bar_menu( $wp_admin_bar ) {
+    if ( ! current_user_can( 'manage_options' ) ) return;
+
+    $wp_admin_bar->add_node( [
+        'id'    => 'henkan_menu',
+        'title' => '<span class="ab-icon dashicons dashicons-format-image"></span> Henkan',
+        'href'  => admin_url( 'options-general.php?page=henkan-settings' ),
+    ] );
+
+    $wp_admin_bar->add_node( [
+        'id'     => 'henkan_settings',
+        'title'  => __( 'Einstellungen', 'henkan' ),
+        'parent' => 'henkan_menu',
+        'href'   => admin_url( 'options-general.php?page=henkan-settings' ),
+    ] );
+}
+
 function henkan_sanitize_settings( $input ) {
     $keys = [
         'enable_webp', 'enable_avif', 'keep_original', 
@@ -109,7 +157,7 @@ function henkan_admin_page() {
     <div class="wrap henkan-wrap">
         <div class="henkan-header">
             <div class="header-title">
-                <h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v1.7</span></h1>
+                <h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v1.8</span></h1>
             </div>
             <div class="header-branding">
                 <span class="dashicons dashicons-format-image" style="font-size:40px; width:40px; height:40px; color:#ccc;"></span>

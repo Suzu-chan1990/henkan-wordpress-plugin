@@ -4,7 +4,7 @@ Tags: webp, avif, image optimization, converter, performance
 Requires at least: 5.0
 Tested up to: 6.9
 Requires PHP: 7.0
-Stable tag: 1.7
+Stable tag: 1.8
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -39,6 +39,10 @@ Unlike simple converters, Henkan offers a robust set of tools including a smart 
 2.  **Bulk Tool:** The bulk conversion progress interface.
 
 == Changelog ==
+
+= 1.8 =
+* New Feature: Added Dashboard Widget with optimization stats.
+* New Feature: Added Admin Bar menu for quick access.
 
 = 1.7 =
 * Final compliance fixes for WordPress.org standards.

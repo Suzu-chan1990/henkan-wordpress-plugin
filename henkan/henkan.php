@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 1.7
+ * Version: 1.8
  * Author: すずちゃん
  * Text Domain: henkan
  * Domain Path: /languages
@@ -43,7 +43,6 @@ function henkan_get_settings() {
 
 function henkan_log( $msg ) {
     $s = henkan_get_settings();
-    // Check for WP_DEBUG to allow strict checks to pass
     if ( defined( 'WP_DEBUG' ) && WP_DEBUG && ! empty( $s['debug'] ) ) {
         // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log, WordPress.PHP.DevelopmentFunctions.error_log_print_r
         error_log( '[Henkan] ' . ( is_scalar( $msg ) ? $msg : print_r( $msg, true ) ) );
@@ -73,8 +72,8 @@ function henkan_enqueue_admin( $hook ) {
         return;
     }
 
-    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '1.7' );
-    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '1.7', true );
+    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '1.8' );
+    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '1.8', true );
 
     wp_localize_script( 'henkan-admin-script', 'henkan_ajax', [
         'ajax_url'      => admin_url( 'admin-ajax.php' ),
@@ -92,20 +91,13 @@ function henkan_enqueue_admin( $hook ) {
     ] );
 }
 
-// -----------------------------------------------------------------------
-// GitHub Auto-Updater Integration
-// -----------------------------------------------------------------------
+// GitHub Auto-Updater (v5)
 if ( file_exists( plugin_dir_path( __FILE__ ) . 'plugin-update-checker/plugin-update-checker.php' ) ) {
     require 'plugin-update-checker/plugin-update-checker.php';
-    
-    // Verwende v5 Namespace Syntax
     $myUpdateChecker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
         'https://github.com/Suzu-chan1990/henkan-wordpress-plugin',
         __FILE__,
         'henkan'
     );
-
-    // WICHTIG: Erzwingt die Nutzung der ZIP aus den Release-Assets
-    // Dies verhindert den "No valid plugins found" Fehler!
     $myUpdateChecker->getVcsApi()->enableReleaseAssets();
 }
