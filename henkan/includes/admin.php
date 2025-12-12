@@ -15,7 +15,7 @@ add_action( 'admin_init', function() {
     register_setting( 'henkan_settings_group', 'henkan_settings', 'henkan_sanitize_settings' );
 });
 
-// --- V1.9: Media Library Column ---
+// --- Media Library Column ---
 add_filter( 'manage_media_columns', 'henkan_add_media_column' );
 function henkan_add_media_column( $columns ) {
     $columns['henkan_status'] = __( 'Henkan', 'henkan' );
@@ -37,16 +37,14 @@ function henkan_media_custom_column_content( $column_name, $id ) {
     $meta = get_post_meta( $id, '_henkan_converted_files', true );
     
     if ( ! empty( $meta ) ) {
-        // Optimized
         echo '<span class="dashicons dashicons-yes" style="color:#46b450;"></span> <span style="color:#46b450; font-weight:bold;">OK</span>';
     } else {
-        // Not optimized
         echo '<button type="button" class="button button-small henkan-quick-convert" data-id="' . esc_attr( $id ) . '">' . esc_html__( 'Optimieren', 'henkan' ) . '</button>';
         echo '<span class="henkan-spinner spinner" style="float:none; margin-top:0;"></span>';
     }
 }
 
-// --- V1.8: Dashboard Widget ---
+// --- Dashboard Widget ---
 add_action( 'wp_dashboard_setup', 'henkan_add_dashboard_widgets' );
 function henkan_add_dashboard_widgets() {
     wp_add_dashboard_widget(
@@ -75,7 +73,7 @@ function henkan_dashboard_widget_content() {
     echo '<p style="text-align:right; margin-top:10px;"><a href="' . esc_url( admin_url( 'options-general.php?page=henkan-settings' ) ) . '" class="button button-small">' . esc_html__( 'Zum Konverter', 'henkan' ) . '</a></p>';
 }
 
-// --- V1.8: Admin Bar Menu ---
+// --- Admin Bar Menu ---
 add_action( 'admin_bar_menu', 'henkan_admin_bar_menu', 99 );
 function henkan_admin_bar_menu( $wp_admin_bar ) {
     if ( ! current_user_can( 'manage_options' ) ) return;
@@ -106,6 +104,7 @@ function henkan_sanitize_settings( $input ) {
     }
     
     $input['quality']        = intval( $input['quality'] );
+    // Fix: wp_strip_all_tags (Plugin Check Compliance)
     $input['custom_folders'] = wp_strip_all_tags( $input['custom_folders'] );
     return $input;
 }
@@ -113,6 +112,7 @@ function henkan_sanitize_settings( $input ) {
 function henkan_get_stats() {
     global $wpdb;
     
+    // Fix: Caching (Plugin Check Compliance)
     $cache_key_total = 'henkan_stats_total';
     $total = wp_cache_get( $cache_key_total, 'henkan' );
     
@@ -131,7 +131,13 @@ function henkan_get_stats() {
         wp_cache_set( $cache_key_conv, $converted, 'henkan', 300 );
     }
 
-    $percent = $total > 0 ? round( ( $converted / $total ) * 100 ) : 0;
+    // FIX: Safely calculate percentage to avoid division by zero or values > 100
+    if ( $total > 0 ) {
+        $percent = round( ( $converted / $total ) * 100 );
+        if ( $percent > 100 ) $percent = 100;
+    } else {
+        $percent = 0;
+    }
     
     return [
         'total'     => $total, 
@@ -188,7 +194,7 @@ function henkan_admin_page() {
     <div class="wrap henkan-wrap">
         <div class="henkan-header">
             <div class="header-title">
-                <h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v1.9</span></h1>
+                <h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v1.9.1</span></h1>
             </div>
             <div class="header-branding">
                 <span class="dashicons dashicons-format-image" style="font-size:40px; width:40px; height:40px; color:#ccc;"></span>

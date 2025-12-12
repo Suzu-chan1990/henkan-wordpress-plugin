@@ -1,6 +1,6 @@
 
 jQuery(document).ready(function($) {
-    // Existing Tabs Logic
+    // Tabs Logic
     $('.henkan-tab-btn').on('click', function() {
         $('.henkan-tab-btn').removeClass('active');
         $(this).addClass('active');
@@ -8,7 +8,7 @@ jQuery(document).ready(function($) {
         $('#tab-' + $(this).data('target')).show();
     });
 
-    // --- NEW V1.9: Media Library Button Handler ---
+    // Media Library Button Handler
     $(document).on('click', '.henkan-quick-convert', function(e) {
         e.preventDefault();
         const btn = $(this);
@@ -37,7 +37,7 @@ jQuery(document).ready(function($) {
         });
     });
 
-    // Bulk Process Logic (Unchanged)
+    // Bulk Process Logic
     let todoList = [];
     let totalTodo = 0;
 
