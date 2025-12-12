@@ -117,6 +117,7 @@ function henkan_convert() {
 
     check_ajax_referer( 'henkan_convert_nonce', 'nonce' );
     
+    // Fix: wp_unslash before sanitize
     $item = isset( $_POST['item'] ) ? sanitize_text_field( wp_unslash( $_POST['item'] ) ) : null;
     
     if ( ! $item ) wp_send_json_error( [ 'msg' => 'Kein Item' ] );

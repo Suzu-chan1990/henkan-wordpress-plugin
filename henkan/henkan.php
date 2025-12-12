@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 1.6
+ * Version: 1.7
  * Author: すずちゃん
  * Text Domain: henkan
  * Domain Path: /languages
@@ -73,8 +73,8 @@ function henkan_enqueue_admin( $hook ) {
         return;
     }
 
-    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '1.6' );
-    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '1.6', true );
+    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '1.7' );
+    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '1.7', true );
 
     wp_localize_script( 'henkan-admin-script', 'henkan_ajax', [
         'ajax_url'      => admin_url( 'admin-ajax.php' ),
@@ -97,12 +97,12 @@ function henkan_enqueue_admin( $hook ) {
 // -----------------------------------------------------------------------
 if ( file_exists( plugin_dir_path( __FILE__ ) . 'plugin-update-checker/plugin-update-checker.php' ) ) {
     require 'plugin-update-checker/plugin-update-checker.php';
-    $myUpdateChecker = YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+    $myUpdateChecker = \YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
         'https://github.com/Suzu-chan1990/henkan-wordpress-plugin',
         __FILE__,
         'henkan'
     );
 
-    // Optional: Wenn du Releases als 'v1.6' taggst, aber im Plugin '1.6' steht:
-    // $myUpdateChecker->getVcsApi()->enableReleaseAssets();
+    // Force updater to use the ZIP asset from the release
+    $myUpdateChecker->getVcsApi()->enableReleaseAssets();
 }
