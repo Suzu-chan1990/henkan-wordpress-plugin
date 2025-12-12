@@ -91,3 +91,18 @@ function henkan_enqueue_admin( $hook ) {
         ]
     ] );
 }
+
+// -----------------------------------------------------------------------
+// GitHub Auto-Updater Integration
+// -----------------------------------------------------------------------
+if ( file_exists( plugin_dir_path( __FILE__ ) . 'plugin-update-checker/plugin-update-checker.php' ) ) {
+    require 'plugin-update-checker/plugin-update-checker.php';
+    $myUpdateChecker = Puc_v4_Factory::buildUpdateChecker(
+        'https://github.com/Suzu-chan1990/henkan-wordpress-plugin',
+        __FILE__,
+        'henkan'
+    );
+
+    // Optional: Wenn du Releases als 'v1.6' taggst, aber im Plugin '1.6' steht:
+    // $myUpdateChecker->getVcsApi()->enableReleaseAssets();
+}
