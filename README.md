@@ -25,15 +25,3 @@ Unlike simple converters, Henkan offers a robust set of tools including a smart 
 
 1.  **Dashboard:** The main settings and statistics overview.
 2.  **Bulk Tool:** The bulk conversion progress interface.
-
-== Changelog ==
-
-= 1.6 =
-* Added WP-CLI support.
-* Added AVIF support.
-* Improved bulk scanning logic.
-* Added support for custom folder scanning.
-* Added automatic cache clearing for popular caching plugins.
-
-= 1.0 =
-* Initial release.
