@@ -1,3 +1,15 @@
+=== Henkan - WebP & AVIF Converter ===
+Contributors: suzuchan
+Tags: webp, avif, image optimization, converter, performance
+Requires at least: 5.0
+Tested up to: 6.9
+Requires PHP: 7.0
+Stable tag: 2.0.0
+License: GPLv2 or later
+License URI: https://www.gnu.org/licenses/gpl-2.0.html
+
+Henkan is a professional, lightweight image optimization plugin that converts images to WebP and AVIF.
+
 == Description ==
 
 Henkan is a professional, lightweight image optimization plugin for WordPress. It automatically converts your images to modern formats (**WebP** and **AVIF**) to improve page load speeds and Core Web Vitals scores.
@@ -25,3 +37,41 @@ Unlike simple converters, Henkan offers a robust set of tools including a smart 
 
 1.  **Dashboard:** The main settings and statistics overview.
 2.  **Bulk Tool:** The bulk conversion progress interface.
+
+== Changelog ==
+
+= 2.0.0 =
+* Major: Added full native AVIF database integration (saves `image/avif` directly to the WordPress database).
+* Fixed: Frontend regular expression fixed. Now prevents duplicate file extensions for existing WebP/AVIF images (`.webp.avif`).
+* Fixed: Fixed a RAM/memory leak in the browser that could cause crashes during massive bulk conversions.
+* Fixed: AVIF file remnants are now cleanly removed from the server when an image is deleted from the media library.
+
+= 1.9.2 =
+* Fixed: Percentage calculation for libraries with pre-existing WebP/AVIF images.
+* Added: Professional branding assets.
+
+= 1.9.1 =
+* Fixed: Percentage calculation bug in dashboard (showing >100%).
+* Improved: Full compliance with WordPress.org coding standards.
+
+= 1.9 =
+* New Feature: Added Status Column to the Media Library.
+* New Feature: Quick "Optimize" button for individual images in the Media Library list view.
+
+= 1.8 =
+* New Feature: Added Dashboard Widget with optimization stats.
+* New Feature: Added Admin Bar menu for quick access.
+
+= 1.7 =
+* Final compliance fixes for WordPress.org standards.
+* Improved GitHub Updater integration (Release Assets support).
+
+= 1.6 =
+* Added WP-CLI support.
+* Added AVIF support.
+* Improved bulk scanning logic.
+* Added support for custom folder scanning.
+* Added automatic cache clearing for popular caching plugins.
+
+= 1.0 =
+* Initial release.

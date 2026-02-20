@@ -1,0 +1,134 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Henkan 1.6\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2023-10-27 12:00+0000\n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Language: en_US\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: HenkanPatchScript\n"
+
+msgid "Starte..."
+msgstr "Starting..."
+
+msgid "Fehler: %s"
+msgstr "Error: %s"
+
+msgid "Fertig!"
+msgstr "Done!"
+
+msgid "Verarbeite %1$s von %2$s..."
+msgstr "Processing %1$s of %2$s..."
+
+msgid "Henkan Bild-Optimierung"
+msgstr "Henkan Image Optimization"
+
+msgid "Henkan"
+msgstr "Henkan"
+
+msgid "DB Bilder"
+msgstr "DB Images"
+
+msgid "Optimiert (Meta)"
+msgstr "Optimized (Meta)"
+
+msgid "Server"
+msgstr "Server"
+
+msgid "Aktiv"
+msgstr "Active"
+
+msgid "Inaktiv"
+msgstr "Inactive"
+
+msgid "Kein Cache"
+msgstr "No Cache"
+
+msgid "Einstellungen"
+msgstr "Settings"
+
+msgid "WebP aktivieren"
+msgstr "Enable WebP"
+
+msgid "AVIF aktivieren"
+msgstr "Enable AVIF"
+
+msgid "Qualität (1-100)"
+msgstr "Quality (1-100)"
+
+msgid "Ordner scannen"
+msgstr "Scan Folders"
+
+msgid "Uploads Verzeichnis"
+msgstr "Uploads Directory"
+
+msgid "Theme Verzeichnis"
+msgstr "Theme Directory"
+
+msgid "Weitere Pfade:"
+msgstr "Additional Paths:"
+
+msgid "Frontend"
+msgstr "Frontend"
+
+msgid "Frontend <code>&lt;picture&gt;</code>"
+msgstr "Frontend <code>&lt;picture&gt;</code>"
+
+msgid "Native Lazy-Loading"
+msgstr "Native Lazy-Loading"
+
+msgid "Auto-Cache-Clear"
+msgstr "Auto Cache Clear"
+
+msgid "Originale behalten"
+msgstr "Keep Originals"
+
+msgid "Debug Logging"
+msgstr "Debug Logging"
+
+msgid "Speichern"
+msgstr "Save"
+
+msgid "Server Rewrites"
+msgstr "Server Rewrites"
+
+msgid "WP-CLI Befehle"
+msgstr "WP-CLI Commands"
+
+msgid "Status:"
+msgstr "Status:"
+
+msgid "Konvertieren (fehlende):"
+msgstr "Convert (missing):"
+
+msgid "Alles erzwingen:"
+msgstr "Force all:"
+
+msgid "Bulk Konvertierung"
+msgstr "Bulk Conversion"
+
+msgid "Nur fehlende (File-Check)"
+msgstr "Only missing (File Check)"
+
+msgid "Erzwingen"
+msgstr "Force"
+
+msgid "Scan starten"
+msgstr "Start Scan"
+
+msgid "Gefunden:"
+msgstr "Found:"
+
+msgid "Zu tun:"
+msgstr "To do:"
+
+msgid "Optimierung Starten"
+msgstr "Start Optimization"
+
+msgid "Initialisiere..."
+msgstr "Initializing..."
+
