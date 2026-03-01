@@ -14,6 +14,7 @@ function henkan_scan() {
     
     $force        = ! empty( $_POST['rescan_all'] );
     $only_missing = ! empty( $_POST['bulk_only_unconverted'] );
+    $only_failed  = ! empty( $_POST['bulk_only_failed'] );
     
     $settings      = henkan_get_settings();
     $todo          = [];
@@ -30,6 +31,12 @@ function henkan_scan() {
     $total_scanned += count( $ids );
 
     foreach ( $ids as $id ) {
+        if ( ! empty( $only_failed ) ) {
+            $st = get_post_meta( $id, '_henkan_state', true );
+            if ( $st === 'failed' ) $todo[] = $id;
+            continue;
+        }
+
         $needs_work = true;
 
         if ( ! $force && $only_missing ) {

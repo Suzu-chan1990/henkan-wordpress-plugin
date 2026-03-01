@@ -12,19 +12,24 @@ Henkan is a professional, lightweight image optimization plugin that converts im
 
 == Description ==
 
-Henkan is a professional, lightweight image optimization plugin for WordPress. It automatically converts your images to modern formats (**WebP** and **AVIF**) to improve page load speeds and Core Web Vitals scores.
+Henkan is a professional, lightweight image optimization plugin for WordPress. It converts your images to modern formats (**WebP** or **AVIF**) to improve page load speeds and Core Web Vitals scores.
 
 Unlike simple converters, Henkan offers a robust set of tools including a smart bulk scanner, WP-CLI integration for power users, frontend `<picture>` tag replacement, and automatic cache clearing.
 
 **Key Features**
 
-* **Next-Gen Formats:** Convert JPG/PNG images to **WebP** and **AVIF**.
-* **Dual Conversion Engine:** Uses System Binary (cwebp) if available, falls back to GD Library.
-* **Smart Frontend Delivery:** Automatically rewrites `<img>` tags to `<picture>` tags.
+* **User-driven format choice:** Choose **WebP** *or* **AVIF** as your target format (no automatic switching).
+* **Optional original handling:** Keep original JPG/PNG files, or delete them after conversion.
+* **Converter selection (strict):** Pick the encoder you want to use (if available on your system). No hidden fallbacks.
+* **Missing-only bulk mode:** Convert only files that are not yet converted to the chosen format.
+* **Resumeable bulk jobs:** Continue bulk conversions after a page reload (no lost progress).
+* **Conversion state tracking:** Clear status per attachment (OK/Failed) with an error reason for troubleshooting.
+* **Smart Frontend Delivery:** Optionally rewrites `<img>` tags to `<picture>` tags for best browser support.
 * **Native Lazy Loading:** Adds `loading="lazy"` attributes automatically.
 * **Bulk Optimization:** Scans Media Library and custom folders.
 * **WP-CLI Integration:** Full support for command-line management.
 * **Cache Integration:** Automatically flushes caches (WP Rocket, W3TC, Autoptimize, etc.).
+
 
 == Installation ==
 
@@ -38,13 +43,20 @@ Unlike simple converters, Henkan offers a robust set of tools including a smart 
 1.  **Dashboard:** The main settings and statistics overview.
 2.  **Bulk Tool:** The bulk conversion progress interface.
 
+== Upgrade Notice ==
+
+= 2.0.0 =
+This is a major update. Review your format and converter settings after upgrading.
+
 == Changelog ==
 
 = 2.0.0 =
-* Major: Added full native AVIF database integration (saves `image/avif` directly to the WordPress database).
-* Fixed: Frontend regular expression fixed. Now prevents duplicate file extensions for existing WebP/AVIF images (`.webp.avif`).
-* Fixed: Fixed a RAM/memory leak in the browser that could cause crashes during massive bulk conversions.
-* Fixed: AVIF file remnants are now cleanly removed from the server when an image is deleted from the media library.
+* New: Strict single-format workflow — user chooses WebP **or** AVIF (no auto-mode, no dual-output).
+* New: Converter selection per format (when available on the system). No hidden fallbacks.
+* New: Missing-only bulk conversions (skip already-converted targets).
+* New: Resumeable bulk conversions in admin (continue after page reload).
+* New: Conversion state tracking (OK/Failed) with stored error reason.
+* Improved: Bulk scan options incl. “only failed” for targeted retries.
 
 = 1.9.2 =
 * Fixed: Percentage calculation for libraries with pre-existing WebP/AVIF images.

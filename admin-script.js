@@ -1,5 +1,12 @@
 
 jQuery(document).ready(function($) {
+    const HENKAN_BULK_STATE = 'henkan_bulk_state_v1';
+    function saveState(todo, total){ try{ localStorage.setItem(HENKAN_BULK_STATE, JSON.stringify({todo, total, ts: Date.now()})); }catch(e){} }
+    function loadState(){ try{ const raw=localStorage.getItem(HENKAN_BULK_STATE); if(!raw) return null; const st=JSON.parse(raw); if(!st||!Array.isArray(st.todo)) return null; return st; }catch(e){ return null; } }
+    function clearState(){ try{ localStorage.removeItem(HENKAN_BULK_STATE);}catch(e){} }
+    const st0 = loadState();
+    if(st0 && st0.todo.length>0){ $('#henkan_scan_results').show(); $('#henkan_to_convert').text(st0.todo.length); $('#henkan_resume_convert').show(); $('#henkan_status_text').text('Bereit zum Fortsetzen…'); }
+
     // Tabs Logic
     $('.henkan-tab-btn').on('click', function() {
         $('.henkan-tab-btn').removeClass('active');
@@ -50,7 +57,8 @@ jQuery(document).ready(function($) {
             action: 'henkan_scan',
             nonce: henkan_ajax.nonce_scan,
             rescan_all: $('#henkan_bulk_rescan_all').is(':checked') ? 1 : 0,
-            bulk_only_unconverted: $('#henkan_bulk_only_unconverted').is(':checked') ? 1 : 0
+            bulk_only_unconverted: $('#henkan_bulk_only_unconverted').is(':checked') ? 1 : 0,
+            bulk_only_failed: $('#henkan_bulk_only_failed').is(':checked') ? 1 : 0
         }, function(res) {
             if(res.success) {
                 if(res.data.debug_log && res.data.debug_log.length > 0) {
@@ -61,6 +69,7 @@ jQuery(document).ready(function($) {
 
                 todoList = res.data.items;
                 totalTodo = todoList.length;
+                saveState(todoList, totalTodo);
                 
                 $('#henkan_total_found').text(res.data.total_scanned);
                 $('#henkan_to_convert').text(totalTodo);
@@ -85,6 +94,7 @@ jQuery(document).ready(function($) {
 
     function processNextBatch() {
         if(todoList.length === 0) {
+            clearState();
             $('#henkan_status_text').text(henkan_ajax.i18n.done);
             $('.fill').css('width', '100%');
             $('#henkan_log_list').prepend('<li><strong>Fertig!</strong> Alle Prozesse abgeschlossen.</li>');
@@ -111,10 +121,8 @@ jQuery(document).ready(function($) {
         }, function(res) {
             if(res.success) {
                 $('#henkan_log_list').prepend('<li>' + res.data.msg + '</li>');
-                if ($('#henkan_log_list li').length > 50) $('#henkan_log_list li:last').remove();
             } else {
                 $('#henkan_log_list').prepend('<li style="color:red">Error: ' + res.data.msg + '</li>');
-                if ($('#henkan_log_list li').length > 50) $('#henkan_log_list li:last').remove();
             }
             processNextBatch();
         }).fail(function() {

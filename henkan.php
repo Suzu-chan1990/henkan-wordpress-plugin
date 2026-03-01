@@ -21,6 +21,8 @@ function henkan_default_settings() {
     return [
         'enable_webp'            => 1,
         'enable_avif'            => 0,
+        'webp_converter'         => 'cwebp',
+        'avif_converter'         => 'avifenc',
         'keep_original'          => 1,
         'quality'                => 82,
         'debug'                  => 0,
@@ -72,8 +74,8 @@ function henkan_enqueue_admin( $hook ) {
         return;
     }
 
-    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '1.9.2' );
-    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '1.9.2', true );
+    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '2.0.0' );
+    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '2.0.0', true );
 
     wp_localize_script( 'henkan-admin-script', 'henkan_ajax', [
         'ajax_url'      => admin_url( 'admin-ajax.php' ),

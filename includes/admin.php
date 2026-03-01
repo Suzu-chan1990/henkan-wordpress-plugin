@@ -75,8 +75,26 @@ function henkan_admin_bar_menu( $wp_admin_bar ) {
 function henkan_sanitize_settings( $input ) {
     $keys = [ 'enable_webp', 'enable_avif', 'keep_original', 'picture_filter_enabled', 'enable_lazy_loading', 'debug', 'auto_clear_cache', 'scan_uploads_dir', 'scan_theme_dir' ];
     foreach ( $keys as $key ) { $input[ $key ] = isset( $input[ $key ] ) ? 1 : 0; }
-    $input['quality'] = intval( $input['quality'] );
-    $input['custom_folders'] = wp_strip_all_tags( $input['custom_folders'] );
+
+    // SINGLE FORMAT: user picks webp OR avif (or both off).
+    if ( ! empty( $input['enable_webp'] ) && ! empty( $input['enable_avif'] ) ) {
+        // resolve invalid UI state deterministically (no auto-mode): AVIF checkbox disables WebP
+        $input['enable_webp'] = 0;
+    }
+
+    $input['quality'] = isset( $input['quality'] ) ? intval( $input['quality'] ) : 82;
+    $input['custom_folders'] = isset( $input['custom_folders'] ) ? wp_strip_all_tags( $input['custom_folders'] ) : '';
+
+    // Converter allowlists (NO fallback, only validation)
+    $webp_allowed = [ 'cwebp', 'gd' ];
+    $avif_allowed = [ 'avifenc', 'imagick', 'gd' ];
+
+    $input['webp_converter'] = isset( $input['webp_converter'] ) ? sanitize_text_field( $input['webp_converter'] ) : 'cwebp';
+    $input['avif_converter'] = isset( $input['avif_converter'] ) ? sanitize_text_field( $input['avif_converter'] ) : 'avifenc';
+
+    if ( ! in_array( $input['webp_converter'], $webp_allowed, true ) ) $input['webp_converter'] = 'cwebp';
+    if ( ! in_array( $input['avif_converter'], $avif_allowed, true ) ) $input['avif_converter'] = 'avifenc';
+
     return $input;
 }
 
@@ -168,6 +186,26 @@ function henkan_admin_page() {
                         <div class="henkan-section">
                             <label class="henkan-toggle"><input type="checkbox" name="henkan_settings[enable_webp]" value="1" <?php checked( 1, $s['enable_webp'] ); ?>><span class="slider"></span><span class="label-text"><?php esc_html_e( 'WebP aktivieren', 'henkan' ); ?> <?php echo wp_kses_post( $badge_webp ); ?></span></label>
                             <label class="henkan-toggle"><input type="checkbox" name="henkan_settings[enable_avif]" value="1" <?php checked( 1, $s['enable_avif'] ); ?>><span class="slider"></span><span class="label-text"><?php esc_html_e( 'AVIF aktivieren', 'henkan' ); ?> <?php echo wp_kses_post( $badge_avif ); ?></span></label>
+        <div class="henkan-section" style="margin-top:10px;">
+            <div style="display:grid; grid-template-columns: 180px 1fr; gap:10px; align-items:center;">
+                <label style="font-weight:600;"><?php esc_html_e( 'WebP Converter', 'henkan' ); ?></label>
+                <select name="henkan_settings[webp_converter]">
+                    <option value="cwebp" <?php selected( 'cwebp', $s['webp_converter'] ?? 'cwebp' ); ?>>cwebp (exec)</option>
+                    <option value="gd" <?php selected( 'gd', $s['webp_converter'] ?? 'cwebp' ); ?>>GD (imagewebp)</option>
+                </select>
+
+                <label style="font-weight:600;"><?php esc_html_e( 'AVIF Converter', 'henkan' ); ?></label>
+                <select name="henkan_settings[avif_converter]">
+                    <option value="avifenc" <?php selected( 'avifenc', $s['avif_converter'] ?? 'avifenc' ); ?>>avifenc (exec)</option>
+                    <option value="imagick" <?php selected( 'imagick', $s['avif_converter'] ?? 'avifenc' ); ?>>ImageMagick (exec)</option>
+                    <option value="gd" <?php selected( 'gd', $s['avif_converter'] ?? 'avifenc' ); ?>>GD (imageavif)</option>
+                </select>
+            </div>
+            <p style="margin:8px 0 0; color:#666; font-size:12px;">
+                <?php esc_html_e( 'Der gewählte Converter wird strikt verwendet. Kein Auto-Fallback.', 'henkan' ); ?>
+            </p>
+        </div>
+
                         </div>
                         <div class="henkan-section">
                             <label><?php esc_html_e( 'Qualität (1-100)', 'henkan' ); ?></label>
@@ -252,12 +290,18 @@ location ~* ^.+\.(png|jpe?g)$ {
                     </div>
                     <div class="henkan-bulk-opts">
                         <label><input type="checkbox" id="henkan_bulk_only_unconverted" <?php checked( 1, $s['bulk_only_unconverted'] ); ?>> <?php esc_html_e( 'Nur fehlende (File-Check)', 'henkan' ); ?></label><br>
+        <label><input type="checkbox" id="henkan_bulk_only_failed"> <?php esc_html_e( 'Nur fehlgeschlagene', 'henkan' ); ?></label><br>
+
                         <label><input type="checkbox" id="henkan_bulk_rescan_all"> <?php esc_html_e( 'Erzwingen', 'henkan' ); ?></label>
                     </div>
                     <button id="henkan_start_scan" class="button button-primary full-width"><?php esc_html_e( 'Scan starten', 'henkan' ); ?></button>
                     <div id="henkan_scan_results" style="display:none; margin-top:15px; text-align:center;">
                         <p><?php esc_html_e( 'Gefunden:', 'henkan' ); ?> <strong id="henkan_total_found">0</strong><br><?php esc_html_e( 'Zu tun:', 'henkan' ); ?> <strong id="henkan_to_convert">0</strong></p>
                         <button id="henkan_start_convert" class="button button-hero full-width" style="background:#46b450; color:#fff;"><?php esc_html_e( 'Optimierung Starten', 'henkan' ); ?></button>
+        <button id="henkan_resume_convert" class="button button-secondary full-width" style="display:none; margin-top:10px;">
+            <?php esc_html_e( 'Fortsetzen (Resume)', 'henkan' ); ?>
+        </button>
+
                     </div>
                     <div id="henkan_progress_ui" style="display:none; margin-top:15px;">
                         <div class="henkan-progress-bar"><div class="fill" style="width:0%"></div></div>
