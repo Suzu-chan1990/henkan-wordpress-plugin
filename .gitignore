@@ -1,0 +1,14 @@
+# Ignoriere Systemdateien
+.DS_Store
+Thumbs.db
+
+# Ignoriere Python Hilfs-Skripte
+*.py
+__pycache__/
+
+# Ignoriere ZIP Dateien (werden separat als Release hochgeladen)
+*.zip
+
+# Ignoriere IDE Ordner (falls vorhanden)
+.vscode/
+.idea/
