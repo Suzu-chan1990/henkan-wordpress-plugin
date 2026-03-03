@@ -168,7 +168,7 @@ function henkan_admin_page() {
     ?>
     <div class="wrap henkan-wrap">
         <div class="henkan-header">
-            <div class="header-title"><h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v2.0.0</span></h1></div>
+            <div class="header-title"><h1><?php esc_html_e( 'Henkan', 'henkan' ); ?> <span class="version">v2.0.1</span></h1></div>
             <div class="header-branding"><span class="dashicons dashicons-format-image" style="font-size:40px; width:40px; height:40px; color:#ccc;"></span></div>
         </div>
         <div class="henkan-grid top-stats">

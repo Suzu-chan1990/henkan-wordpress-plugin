@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 2.0.0
+ * Version: 2.0.1
  * Author: すずちゃん
  * Text Domain: henkan
  * Domain Path: /languages
@@ -74,8 +74,8 @@ function henkan_enqueue_admin( $hook ) {
         return;
     }
 
-    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '2.0.0' );
-    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '2.0.0', true );
+    wp_enqueue_style( 'henkan-admin-style', HENKAN_URL . 'admin-style.css', [], '2.0.1' );
+    wp_enqueue_script( 'henkan-admin-script', HENKAN_URL . 'admin-script.js', [ 'jquery' ], '2.0.1', true );
 
     wp_localize_script( 'henkan-admin-script', 'henkan_ajax', [
         'ajax_url'      => admin_url( 'admin-ajax.php' ),
