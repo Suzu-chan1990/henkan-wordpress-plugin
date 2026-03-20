@@ -1,0 +1,53 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: Henkan 1.6\n"
+"Language: de_DE\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "Starte..."
+msgstr "Starte..."
+
+msgid "ID %d optimized"
+msgstr "ID %d optimiert"
+
+msgid "ID %d checked"
+msgstr "ID %d geprüft"
+
+msgid "File missing ID %d"
+msgstr "Datei fehlt ID %d"
+
+msgid "%s optimized"
+msgstr "%s optimiert"
+
+msgid "%s checked"
+msgstr "%s geprüft"
+
+msgid "Not found: %s"
+msgstr "Nicht gefunden: %s"
+
+msgid "Starting scan..."
+msgstr "Starte Scan..."
+
+msgid "Found: %d images."
+msgstr "Gefunden: %d Bilder."
+
+msgid "No images to process."
+msgstr "Keine Bilder zu verarbeiten."
+
+msgid "Optimizing (cwebp)"
+msgstr "Optimiere (cwebp)"
+
+msgid "Cache cleared."
+msgstr "Cache geleert."
+
+msgid "Done."
+msgstr "Fertig."
+
+msgid "Ready to resume…"
+msgstr "Bereit zum Fortsetzen…"
+
+msgid "Done! All processes completed."
+msgstr "Fertig! Alle Prozesse abgeschlossen."
+
