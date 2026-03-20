@@ -45,6 +45,28 @@ Unlike simple converters, Henkan offers a robust set of tools including a smart 
 
 == Upgrade Notice ==
 
+= 2.0.2 =
+# 🚀 Release v2.0.2: Full i18n Overhaul & WP.org Compliance
+
+This major patch focuses on deeply refactoring the plugin's internationalization (i18n) architecture and ensuring 100% strict compliance with the official WordPress.org Plugin Directory guidelines.
+
+## 🌍 Internationalization (i18n) & Localization
+* **English Base Language:** Completely refactored the plugin's internal strings to use standard English as the base language (`msgid`) instead of German, complying with WordPress best practices.
+* **Hardcoded Strings Removed:** Eliminated all hardcoded strings in backend responses (`ajax.php`) and WP-CLI commands (`cli.php`), wrapping them in proper gettext functions (`__()`, `sprintf()`).
+* **JavaScript Localization:** Implemented `wp_localize_script` to pass translatable strings to the frontend admin scripts, removing hardcoded UI texts like progress states and completion messages.
+* **Translator Context Added:** Added mandatory `/* translators: ... */` PHP comments directly above translatable strings containing dynamic placeholders (`%s`, `%d`) to aid the polyglot community.
+* **Ordered Placeholders:** Fixed unordered placeholder variables in translation strings (e.g., using `%1$s` and `%2$s`) to allow safe restructuring of sentences in different languages.
+* **Updated Language Packs:** The `.po` and `.mo` files for German (`de_DE`), English (`en_US`), and Japanese (`ja`) have been completely synchronized with the new English base strings.
+
+## ⚙️ Core & WordPress.org Compliance
+* **Text Domain Unification:** Conducted a comprehensive sweep to ensure the `henkan-webp-avif-converter` text domain is used exclusively and consistently across all PHP files to match the official plugin slug.
+* **Global Variable Standardization:** Refactored internal global variables to remove leading underscores (e.g., changed `$_henkan_last_error` to `$henkan_last_error`), strictly adhering to WordPress naming conventions.
+* **Stable Tag Alignment:** Synchronized the `Stable tag` in `README.md` to ensure it accurately reflects the main plugin file header version.
+* **Asset Restructuring:** Removed official WordPress.org directory assets (banners and icons) from the core plugin distribution zip. These will be managed exclusively via the `.org` SVN `assets/` directory going forward.
+
+= 2.0.1 =
+* Fixed: Auto Update Path
+
 = 2.0.0 =
 This is a major update. Review your format and converter settings after upgrading.
 
