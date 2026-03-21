@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 2.0.2
+ * Version: 2.0.3
  * Author: すずちゃん
  * Text Domain: henkan-webp-avif-converter
  * Domain Path: /languages

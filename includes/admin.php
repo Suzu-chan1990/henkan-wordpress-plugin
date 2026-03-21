@@ -12,7 +12,15 @@ add_action( 'admin_menu', function() {
 });
 
 add_action( 'admin_init', function() {
-    register_setting( 'henkan_settings_group', 'henkan_settings', 'henkan_sanitize_settings' );
+    register_setting( 
+        'henkan_settings_group', 
+        'henkan_settings', 
+        [
+            'type'              => 'array',
+            'sanitize_callback' => 'henkan_sanitize_settings',
+            'default'           => henkan_default_settings()
+        ] 
+    );
 });
 
 add_filter( 'manage_media_columns', 'henkan_add_media_column' );
@@ -74,29 +82,44 @@ function henkan_admin_bar_menu( $wp_admin_bar ) {
 }
 
 function henkan_sanitize_settings( $input ) {
-    $keys = [ 'enable_webp', 'enable_avif', 'keep_original', 'picture_filter_enabled', 'enable_lazy_loading', 'debug', 'auto_clear_cache', 'scan_uploads_dir', 'scan_theme_dir' ];
-    foreach ( $keys as $key ) { $input[ $key ] = isset( $input[ $key ] ) ? 1 : 0; }
-
-    // SINGLE FORMAT: user picks webp OR avif (or both off).
-    if ( ! empty( $input['enable_webp'] ) && ! empty( $input['enable_avif'] ) ) {
-        // resolve invalid UI state deterministically (no auto-mode): AVIF checkbox disables WebP
-        $input['enable_webp'] = 0;
+    if ( ! is_array( $input ) ) {
+        $input = [];
+    }
+    
+    // Leeres Array für die strikte Whitelist
+    $clean = [];
+    $defaults = henkan_default_settings();
+    
+    // 1. Booleans bereinigen
+    $bool_keys = [ 'enable_webp', 'enable_avif', 'keep_original', 'picture_filter_enabled', 'enable_lazy_loading', 'debug', 'auto_clear_cache', 'scan_uploads_dir', 'scan_theme_dir', 'bulk_only_unconverted' ];
+    foreach ( $bool_keys as $key ) {
+        $clean[ $key ] = ! empty( $input[ $key ] ) ? 1 : 0;
     }
 
-    $input['quality'] = isset( $input['quality'] ) ? intval( $input['quality'] ) : 82;
-    $input['custom_folders'] = isset( $input['custom_folders'] ) ? wp_strip_all_tags( $input['custom_folders'] ) : '';
+    if ( ! empty( $clean['enable_webp'] ) && ! empty( $clean['enable_avif'] ) ) {
+        $clean['enable_webp'] = 0;
+    }
 
-    // Converter allowlists (NO fallback, only validation)
+    // 2. Integer sicher bereinigen (absint & range check)
+    $quality = isset( $input['quality'] ) ? absint( $input['quality'] ) : $defaults['quality'];
+    if ( $quality < 1 ) $quality = 1;
+    if ( $quality > 100 ) $quality = 100;
+    $clean['quality'] = $quality;
+    
+    $clean['batch_size'] = isset( $input['batch_size'] ) ? absint( $input['batch_size'] ) : $defaults['batch_size'];
+
+    // 3. Text/String bereinigen
+    $clean['custom_folders'] = isset( $input['custom_folders'] ) ? sanitize_textarea_field( wp_unslash( $input['custom_folders'] ) ) : '';
+
+    // 4. Strikte Allow-Listen
     $webp_allowed = [ 'cwebp', 'gd' ];
     $avif_allowed = [ 'avifenc', 'imagick', 'gd' ];
 
-    $input['webp_converter'] = isset( $input['webp_converter'] ) ? sanitize_text_field( $input['webp_converter'] ) : 'cwebp';
-    $input['avif_converter'] = isset( $input['avif_converter'] ) ? sanitize_text_field( $input['avif_converter'] ) : 'avifenc';
+    $clean['webp_converter'] = ( isset( $input['webp_converter'] ) && in_array( $input['webp_converter'], $webp_allowed, true ) ) ? $input['webp_converter'] : 'cwebp';
+    $clean['avif_converter'] = ( isset( $input['avif_converter'] ) && in_array( $input['avif_converter'], $avif_allowed, true ) ) ? $input['avif_converter'] : 'avifenc';
 
-    if ( ! in_array( $input['webp_converter'], $webp_allowed, true ) ) $input['webp_converter'] = 'cwebp';
-    if ( ! in_array( $input['avif_converter'], $avif_allowed, true ) ) $input['avif_converter'] = 'avifenc';
-
-    return $input;
+    // Gebe NUR unser bereinigtes Whitelist-Array zurück
+    return $clean;
 }
 
 function henkan_get_stats() {
