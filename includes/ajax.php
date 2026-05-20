@@ -9,7 +9,6 @@ function henkan_scan() {
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( [ 'msg' => 'Unauthorized' ] );
     }
-
     check_ajax_referer( 'henkan_scan_nonce', 'nonce' );
     
     $force        = ! empty( $_POST['rescan_all'] );
@@ -20,7 +19,6 @@ function henkan_scan() {
     $todo          = [];
     $total_scanned = 0;
     
-    // 1. Mediathek Scan (Mit File Check)
     $ids = get_posts( [
         'post_type'      => 'attachment', 
         'post_mime_type' => [ 'image/jpeg', 'image/png' ], 
@@ -38,26 +36,27 @@ function henkan_scan() {
         }
 
         $needs_work = true;
-
         if ( ! $force && $only_missing ) {
-            $has_meta = get_post_meta( $id, '_henkan_converted_files', true );
+            $has_meta = henkan_get_data( $id );
             if ( $has_meta ) {
                 $needs_work = false;
             } else {
                 $file = get_attached_file( $id );
                 if ( $file ) {
                     $path_no_ext = dirname( $file ) . '/' . pathinfo( $file, PATHINFO_FILENAME );
-                    
                     $want_webp = (int) $settings['enable_webp'];
                     $want_avif = (int) $settings['enable_avif'];
+                    $want_jxl  = (int) (!empty($settings['enable_jxl']));
 
                     $webp_exists = file_exists( $path_no_ext . '.webp' );
                     $avif_exists = file_exists( $path_no_ext . '.avif' );
+                    $jxl_exists  = file_exists( $path_no_ext . '.jxl' );
 
                     $webp_ok = ( ! $want_webp ) || $webp_exists;
                     $avif_ok = ( ! $want_avif ) || $avif_exists;
+                    $jxl_ok  = ( ! $want_jxl ) || $jxl_exists;
 
-                    if ( $webp_ok && $avif_ok ) {
+                    if ( $webp_ok && $avif_ok && $jxl_ok ) {
                         $needs_work = false;
                     }
                 } else {
@@ -65,13 +64,15 @@ function henkan_scan() {
                 }
             }
         }
-        
         if ( $needs_work ) {
+            $chk_file = get_attached_file( $id );
+            if ( $chk_file && function_exists('henkan_is_file_excluded') && henkan_is_file_excluded( $chk_file ) ) {
+                continue;
+            }
             $todo[] = $id;
         }
     }
 
-    // 2. Custom Folders Scan
     $scan_paths = [];
     if ( ! empty( $settings['scan_uploads_dir'] ) ) { 
         $u = wp_get_upload_dir(); 
@@ -94,7 +95,7 @@ function henkan_scan() {
             foreach ( $iterator as $file ) {
                 if ( $file->isDir() ) continue;
                 $ext = strtolower( $file->getExtension() );
-                if ( in_array( $ext, [ 'jpg', 'jpeg', 'png' ] ) ) {
+                if ( in_array( $ext, [ 'jpg', 'jpeg', 'png' ], true ) ) {
                     $full_path = $file->getPathname();
                     $total_scanned++;
                     
@@ -103,17 +104,22 @@ function henkan_scan() {
                         $path_no_ext = dirname( $full_path ) . '/' . pathinfo( $full_path, PATHINFO_FILENAME );
                         $webp = file_exists( $path_no_ext . '.webp' );
                         $avif = file_exists( $path_no_ext . '.avif' );
+                        $jxl  = file_exists( $path_no_ext . '.jxl' );
                         
-                        if ( ( $settings['enable_webp'] && $webp ) || ( $settings['enable_avif'] && $avif ) ) {
+                        if ( (!empty($settings['enable_webp']) && $webp) || (!empty($settings['enable_avif']) && $avif) || (!empty($settings['enable_jxl']) && $jxl) ) {
                             $needs_conv = false;
                         }
                     }
-                    if ( $needs_conv ) $todo[] = $full_path;
+                    if ( $needs_conv ) {
+                        if ( function_exists('henkan_is_file_excluded') && henkan_is_file_excluded( $full_path ) ) {
+                            continue;
+                        }
+                        $todo[] = $full_path;
+                    }
                 }
             }
         } catch ( Exception $e ) { continue; }
     }
-    
     wp_send_json_success( [ 'total_scanned' => $total_scanned, 'items' => array_values( $todo ) ] );
 }
 
@@ -121,12 +127,9 @@ function henkan_convert() {
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( [ 'msg' => 'Unauthorized' ] );
     }
-
     check_ajax_referer( 'henkan_convert_nonce', 'nonce' );
     
-    // Fix: wp_unslash before sanitize (Plugin Check Compliance)
     $item = isset( $_POST['item'] ) ? sanitize_text_field( wp_unslash( $_POST['item'] ) ) : null;
-    
     if ( ! $item ) wp_send_json_error( [ 'msg' => __( 'No item', 'henkan-webp-avif-converter' ) ] );
 
     if ( is_numeric( $item ) ) {
@@ -141,23 +144,52 @@ function henkan_convert() {
                     henkan_convert_file( $base.'/'.$data['file'], $id, $size ); 
                 }
             }
-            /* translators: %d: Attachment ID */
-            $msg = $res ? sprintf( __( 'ID %d optimized', 'henkan-webp-avif-converter' ), $id ) : sprintf( __( 'ID %d checked', 'henkan-webp-avif-converter' ), $id );
+            
+            if ( is_array( $res ) ) {
+                if ( $res['success'] ) {
+                    $gen = strtoupper( implode( ', ', $res['generated'] ) );
+                    $fail = empty( $res['failed'] ) ? '' : __( ' | Failed: ', 'henkan-webp-avif-converter' ) . implode( ', ', $res['failed'] );
+                    /* translators: 1: ID, 2: Generated formats, 3: Failed formats */
+                    $msg = sprintf( esc_html__( 'ID %1$d optimized [%2$s]%3$s', 'henkan-webp-avif-converter' ), $id, $gen, $fail );
+                } else {
+                    $fail_reasons = empty( $res['failed'] ) ? __( 'Unknown error', 'henkan-webp-avif-converter' ) : implode( ', ', $res['failed'] );
+                    /* translators: 1: ID, 2: Error reasons */
+                    $msg = sprintf( esc_html__( 'ID %1$d completely failed: %2$s', 'henkan-webp-avif-converter' ), $id, $fail_reasons );
+                }
+            } else {
+                /* translators: %d: ID */
+                $msg = $res ? sprintf( esc_html__( 'ID %d optimiert', 'henkan-webp-avif-converter' ), $id ) : sprintf( esc_html__( 'ID %d checked', 'henkan-webp-avif-converter' ), $id );
+            }
             wp_send_json_success( [ 'msg' => $msg ] );
         } else {
             /* translators: %d: Attachment ID */
-            wp_send_json_error( [ 'msg' => sprintf( __( 'File missing ID %d', 'henkan-webp-avif-converter' ), $id ) ] );
+            $msg_err = sprintf( esc_html__( 'File missing ID %d', 'henkan-webp-avif-converter' ), $id );
+            wp_send_json_error( [ 'msg' => $msg_err ] );
         }
     } else {
         $path = wp_normalize_path( $item );
         if ( file_exists( $path ) ) {
             $res = henkan_convert_file( $path, 0, 'custom' );
-            /* translators: %s: File name */
-            $msg = $res ? sprintf( __( '%s optimized', 'henkan-webp-avif-converter' ), basename( $path ) ) : sprintf( __( '%s checked', 'henkan-webp-avif-converter' ), basename( $path ) );
+            if ( is_array( $res ) ) {
+                if ( $res['success'] ) {
+                    $gen = strtoupper( implode( ', ', $res['generated'] ) );
+                    $fail = empty( $res['failed'] ) ? '' : __( ' | Failed: ', 'henkan-webp-avif-converter' ) . implode( ', ', $res['failed'] );
+                    /* translators: 1: File name, 2: Generated formats, 3: Failed formats */
+                    $msg = sprintf( esc_html__( '%1$s optimized [%2$s]%3$s', 'henkan-webp-avif-converter' ), basename( $path ), $gen, $fail );
+                } else {
+                    $fail_reasons = empty( $res['failed'] ) ? __( 'Unknown error', 'henkan-webp-avif-converter' ) : implode( ', ', $res['failed'] );
+                    /* translators: 1: File name, 2: Error reasons */
+                    $msg = sprintf( esc_html__( '%1$s completely failed: %2$s', 'henkan-webp-avif-converter' ), basename( $path ), $fail_reasons );
+                }
+            } else {
+                /* translators: %s: File name */
+                $msg = $res ? sprintf( esc_html__( '%s optimiert', 'henkan-webp-avif-converter' ), basename( $path ) ) : sprintf( esc_html__( '%s checked', 'henkan-webp-avif-converter' ), basename( $path ) );
+            }
             wp_send_json_success( [ 'msg' => $msg ] );
         } else {
             /* translators: %s: File name */
-            wp_send_json_error( [ 'msg' => sprintf( __( 'Not found: %s', 'henkan-webp-avif-converter' ), basename( $path ) ) ] );
+            $msg_err = sprintf( esc_html__( 'Not found: %s', 'henkan-webp-avif-converter' ), basename( $path ) );
+            wp_send_json_error( [ 'msg' => $msg_err ] );
         }
     }
 }
@@ -166,12 +198,10 @@ function henkan_ajax_clear_cache() {
     if ( ! current_user_can( 'manage_options' ) ) {
         wp_send_json_error( [ 'msg' => 'Unauthorized' ] );
     }
-    
     $settings = henkan_get_settings();
     if ( empty( $settings['auto_clear_cache'] ) ) {
         wp_send_json_success( [ 'msg' => '' ] );
     }
-    
     henkan_trigger_cache_clear();
     wp_send_json_success( [ 'msg' => __( 'Cache cleared successfully.', 'henkan-webp-avif-converter' ) ] );
 }

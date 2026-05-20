@@ -78,7 +78,7 @@ class Henkan_CLI {
                 $todo[] = $id; 
                 continue;
             }
-            if (!get_post_meta($id, '_henkan_converted_files', true)) {
+            if (!henkan_get_data($id)) {
                 $todo[] = $id;
             }
         }

@@ -3,26 +3,40 @@ defined( 'ABSPATH' ) || exit;
 
 add_filter( 'wp_generate_attachment_metadata', 'henkan_handle_upload', 10, 2 );
 
-
-
-function henkan_target_format( $settings ) {
-    if ( ! empty( $settings['enable_avif'] ) ) return 'avif';
-    if ( ! empty( $settings['enable_webp'] ) ) return 'webp';
-    return '';
+// CORRECT GENERATION ORDER
+function henkan_target_formats( $settings ) {
+    $fmts = [];
+    if ( ! empty( $settings['enable_webp'] ) ) $fmts[] = 'webp';
+    if ( ! empty( $settings['enable_avif'] ) ) $fmts[] = 'avif';
+    if ( ! empty( $settings['enable_jxl'] ) ) $fmts[] = 'jxl';
+    return $fmts;
 }
+
 function henkan_target_mime( $fmt ) {
-    return ( $fmt === 'avif' ) ? 'image/avif' : 'image/webp';
+    if ( $fmt === 'jxl' ) return 'image/jxl';
+    if ( $fmt === 'avif' ) return 'image/avif';
+    return 'image/webp';
 }
+
 function henkan_set_state( $attachment_id, $state, $error = '' ) {
     if ( $attachment_id <= 0 ) return;
     update_post_meta( $attachment_id, '_henkan_state', $state );
     if ( $error !== '' ) update_post_meta( $attachment_id, 'henkan_last_error', $error );
     else delete_post_meta( $attachment_id, 'henkan_last_error' );
 }
+
+// STRICT PRIORITY WHEN ORIGINALS ARE DELETED: WEBP > AVIF > JXL
+function henkan_get_primary_format( $generated ) {
+    if ( in_array( 'webp', $generated, true ) ) return 'webp';
+    if ( in_array( 'avif', $generated, true ) ) return 'avif';
+    if ( in_array( 'jxl', $generated, true ) ) return 'jxl';
+    return '';
+}
+
 function henkan_handle_upload( $metadata, $attachment_id ) {
     $settings = henkan_get_settings();
-    $fmt = henkan_target_format( $settings );
-    if ( $fmt === '' ) return $metadata;
+    $fmts = henkan_target_formats( $settings );
+    if ( empty( $fmts ) ) return $metadata;
 
     $file = get_attached_file( $attachment_id );
     if ( ! $file || ! file_exists( $file ) ) return $metadata;
@@ -31,29 +45,41 @@ function henkan_handle_upload( $metadata, $attachment_id ) {
     $ext = strtolower( $path_info['extension'] );
     if ( ! in_array( $ext, [ 'jpg', 'jpeg', 'png' ], true ) ) return $metadata;
 
-    $target_path = $path_info['dirname'] . '/' . $path_info['filename'] . '.' . $fmt;
+    if ( function_exists('henkan_is_file_excluded') && henkan_is_file_excluded( $file ) ) return $metadata;
 
-    $success = henkan_create_image( $file, $target_path, $settings['quality'], $ext, $settings );
+    $any_success = false;
+    $generated = [];
+    $henkan_meta = henkan_get_data( $attachment_id ) ?: [];
+    if ( ! is_array( $henkan_meta ) ) $henkan_meta = [];
+    if ( ! isset( $henkan_meta['original'] ) ) $henkan_meta['original'] = [];
 
-    if ( $success ) {
-        $rel_path = get_post_meta( $attachment_id, '_wp_attached_file', true );
-        if ( $rel_path ) {
-            $new_rel_path = preg_replace( '/\.(jpg|jpeg|png)$/i', '.' . $fmt, $rel_path );
-            update_post_meta( $attachment_id, '_wp_attached_file', $new_rel_path );
+    foreach ( $fmts as $fmt ) {
+        $target_path = $path_info['dirname'] . '/' . $path_info['filename'] . '.' . $fmt;
+        $success = henkan_create_image( $file, $target_path, $settings['quality'], $ext, $settings );
+        if ( $success ) {
+            $henkan_meta['original'][$fmt] = basename( $target_path );
+            $any_success = true;
+            $generated[] = $fmt;
         }
+    }
 
-        wp_update_post( [ 'ID' => $attachment_id, 'post_mime_type' => henkan_target_mime( $fmt ) ] );
-
-        if ( isset( $metadata['file'] ) ) {
-            $metadata['file'] = preg_replace( '/\.(jpg|jpeg|png)$/i', '.' . $fmt, $metadata['file'] );
-        }
-
-        $henkan_meta = [ 'original' => [ $fmt => basename( $target_path ) ] ];
-        update_post_meta( $attachment_id, '_henkan_converted_files', $henkan_meta );
-
+    if ( $any_success ) {
+        henkan_update_data( $attachment_id, $henkan_meta );
         henkan_set_state( $attachment_id, 'ok', '' );
 
-        if ( empty( $settings['keep_original'] ) ) wp_delete_file( $file );
+        if ( empty( $settings['keep_original'] ) ) {
+            $primary_fmt = henkan_get_primary_format( $generated );
+            $rel_path = get_post_meta( $attachment_id, '_wp_attached_file', true );
+            
+            if ( $rel_path && $primary_fmt !== '' ) {
+                $new_rel_path = preg_replace( '/\.(jpg|jpeg|png)$/i', '.' . $primary_fmt, $rel_path );
+                update_post_meta( $attachment_id, '_wp_attached_file', $new_rel_path );
+            }
+            if ( $primary_fmt !== '' ) {
+                wp_update_post( [ 'ID' => $attachment_id, 'post_mime_type' => henkan_target_mime( $primary_fmt ) ] );
+            }
+            wp_delete_file( $file );
+        }
     } else {
         $err = isset( $GLOBALS['henkan_last_error'] ) ? (string) $GLOBALS['henkan_last_error'] : '';
         henkan_set_state( $attachment_id, 'failed', $err );
@@ -63,27 +89,38 @@ function henkan_handle_upload( $metadata, $attachment_id ) {
         $base_dir = $path_info['dirname'];
         foreach ( $metadata['sizes'] as $size_name => $data ) {
             if ( empty( $data['file'] ) ) continue;
-
             $thumb_file = $base_dir . '/' . $data['file'];
             if ( ! file_exists( $thumb_file ) ) continue;
 
             $thumb_info = pathinfo( $thumb_file );
             $thumb_ext  = strtolower( $thumb_info['extension'] );
-
             if ( ! in_array( $thumb_ext, [ 'jpg', 'jpeg', 'png' ], true ) ) continue;
 
-            $thumb_target = $base_dir . '/' . $thumb_info['filename'] . '.' . $fmt;
-            $thumb_success = henkan_create_image( $thumb_file, $thumb_target, $settings['quality'], $thumb_ext, $settings );
+            $thumb_any_success = false;
+            $thumb_generated = [];
 
-            if ( $thumb_success ) {
-                $metadata['sizes'][ $size_name ]['file'] = basename( $thumb_target );
-                $metadata['sizes'][ $size_name ]['mime-type'] = henkan_target_mime( $fmt );
+            if ( ! isset( $henkan_meta[$size_name] ) ) $henkan_meta[$size_name] = [];
 
-                $meta = get_post_meta( $attachment_id, '_henkan_converted_files', true ) ?: [];
-                $meta[ $size_name ][ $fmt ] = basename( $thumb_target );
-                update_post_meta( $attachment_id, '_henkan_converted_files', $meta );
+            foreach ( $fmts as $fmt ) {
+                $target_path = $base_dir . '/' . $thumb_info['filename'] . '.' . $fmt;
+                $success = henkan_create_image( $thumb_file, $target_path, $settings['quality'], $thumb_ext, $settings );
+                if ( $success ) {
+                    $henkan_meta[$size_name][$fmt] = basename( $target_path );
+                    $thumb_any_success = true;
+                    $thumb_generated[] = $fmt;
+                }
+            }
 
-                if ( empty( $settings['keep_original'] ) ) wp_delete_file( $thumb_file );
+            if ( $thumb_any_success ) {
+                henkan_update_data( $attachment_id, $henkan_meta );
+                if ( empty( $settings['keep_original'] ) ) {
+                    $thumb_primary_fmt = henkan_get_primary_format( $thumb_generated );
+                    if ( $thumb_primary_fmt !== '' ) {
+                        $metadata['sizes'][ $size_name ]['file'] = basename( $base_dir . '/' . $thumb_info['filename'] . '.' . $thumb_primary_fmt );
+                        $metadata['sizes'][ $size_name ]['mime-type'] = henkan_target_mime( $thumb_primary_fmt );
+                    }
+                    wp_delete_file( $thumb_file );
+                }
             }
         }
     }
@@ -93,150 +130,137 @@ function henkan_handle_upload( $metadata, $attachment_id ) {
     return $metadata;
 }
 
+// ROBUST GENERATION: TRIES ALL CONVERTERS IF ONE FAILS
 function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = null ) {
     $GLOBALS['henkan_last_error'] = '';
-    if ( file_exists( $dest ) && filesize( $dest ) > 0 ) return true; // missing-only
+    if ( file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
 
     $target_ext = strtolower( pathinfo( $dest, PATHINFO_EXTENSION ) );
     $src_ext = strtolower( (string) $src_ext );
 
-    $quality = intval( $quality );
-    if ( $quality < 1 ) $quality = 1;
-    if ( $quality > 100 ) $quality = 100;
-
+    $quality = max( 1, min( 100, intval( $quality ) ) );
     $settings = is_array( $settings ) ? $settings : henkan_get_settings();
 
+    // WEBP ENGINE WITH FALLBACKS
     if ( $target_ext === 'webp' ) {
-        $conv = $settings['webp_converter'] ?? 'cwebp';
-
-        if ( $conv === 'cwebp' ) {
-            if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                @exec( 'cwebp -version', $o, $rv );
-                if ( $rv === 0 ) {
-                    $cmd = sprintf( 'cwebp -q %d -m 2 %s -o %s -quiet',
-                        $quality,
-                        escapeshellarg( $source ),
-                        escapeshellarg( $dest )
-                    );
-                    @exec( $cmd, $out, $ret );
-                    if ( $ret === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
-                    $GLOBALS['henkan_last_error'] = 'cwebp failed';
-                    return false;
-                }
-                $GLOBALS['henkan_last_error'] = 'cwebp not available';
-                return false;
+        $pref = isset( $settings['webp_converter'] ) ? $settings['webp_converter'] : 'cwebp';
+        $methods = array_unique( [ $pref, 'gd', 'cwebp' ] );
+        $errors = [];
+        foreach ( $methods as $method ) {
+            if ( $method === 'cwebp' ) {
+                if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
+                    @exec( 'cwebp -version', $o, $rv );
+                    if ( $rv === 0 ) {
+                        $cmd = sprintf( 'cwebp -q %d -m 2 %s -o %s -quiet', $quality, escapeshellarg( $source ), escapeshellarg( $dest ) );
+                        @exec( $cmd, $out, $ret );
+                        if ( $ret === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+                        $errors[] = 'cwebp failed';
+                    } else $errors[] = 'cwebp missing';
+                } else $errors[] = 'exec disabled';
+            } elseif ( $method === 'gd' ) {
+                if ( function_exists( 'imagewebp' ) ) {
+                    $content = @file_get_contents( $source );
+                    if ( $content ) {
+                        $img = @imagecreatefromstring( $content );
+                        if ( $img ) {
+                            if ( $src_ext === 'png' ) {
+                                imagepalettetotruecolor( $img );
+                                imagealphablending( $img, true );
+                                imagesavealpha( $img, true );
+                            }
+                            $ok = @imagewebp( $img, $dest, $quality );
+                            @imagedestroy( $img );
+                            if ( $ok && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+                            $errors[] = 'gd write failed';
+                        } else $errors[] = 'gd decode failed';
+                    } else $errors[] = 'read failed';
+                } else $errors[] = 'gd missing';
             }
-            $GLOBALS['henkan_last_error'] = 'exec not available';
-            return false;
         }
-
-        if ( $conv === 'gd' ) {
-            if ( ! function_exists( 'imagewebp' ) ) {
-                $GLOBALS['henkan_last_error'] = 'GD imagewebp() not available';
-                return false;
-            }
-            $content = @file_get_contents( $source );
-            if ( ! $content ) { $GLOBALS['henkan_last_error'] = 'read source failed'; return false; }
-
-            $img = @imagecreatefromstring( $content );
-            if ( ! $img ) { $GLOBALS['henkan_last_error'] = 'imagecreatefromstring failed'; return false; }
-
-            if ( $src_ext === 'png' ) {
-                imagepalettetotruecolor( $img );
-                imagealphablending( $img, true );
-                imagesavealpha( $img, true );
-            }
-
-            $ok = @imagewebp( $img, $dest, $quality );
-            @imagedestroy( $img );
-
-            if ( $ok && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
-            $GLOBALS['henkan_last_error'] = 'GD imagewebp failed';
-            return false;
-        }
-
-        $GLOBALS['henkan_last_error'] = 'Unknown WebP converter';
+        $GLOBALS['henkan_last_error'] = implode( ' | ', array_unique( $errors ) );
         return false;
     }
 
+    // AVIF ENGINE WITH FALLBACKS
     if ( $target_ext === 'avif' ) {
-        $conv = $settings['avif_converter'] ?? 'avifenc';
-
-        if ( $conv === 'avifenc' ) {
-            if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                @exec( 'avifenc --version', $o, $rv );
-                if ( $rv === 0 ) {
-                    $q = (int) round( ( 100 - $quality ) / 100 * 63 );
-                    if ( $q < 0 ) $q = 0;
-                    if ( $q > 63 ) $q = 63;
-
-                    $cmd = sprintf( 'avifenc -q %d %s %s', $q, escapeshellarg( $source ), escapeshellarg( $dest ) );
-                    @exec( $cmd, $out, $ret );
-                    if ( $ret === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
-
-                    $GLOBALS['henkan_last_error'] = 'avifenc failed';
-                    return false;
-                }
-                $GLOBALS['henkan_last_error'] = 'avifenc not available';
-                return false;
+        $pref = isset( $settings['avif_converter'] ) ? $settings['avif_converter'] : 'gd';
+        $methods = array_unique( [ $pref, 'gd', 'avifenc', 'imagick' ] );
+        $errors = [];
+        foreach ( $methods as $method ) {
+            if ( $method === 'avifenc' ) {
+                if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
+                    @exec( 'avifenc --version', $o, $rv );
+                    if ( $rv === 0 ) {
+                        $q = max( 0, min( 63, (int) round( ( 100 - $quality ) / 100 * 63 ) ) );
+                        $cmd = sprintf( 'avifenc -q %d %s %s', $q, escapeshellarg( $source ), escapeshellarg( $dest ) );
+                        @exec( $cmd, $out, $ret );
+                        if ( $ret === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+                        $errors[] = 'avifenc failed';
+                    } else $errors[] = 'avifenc missing';
+                } else $errors[] = 'exec disabled';
+            } elseif ( $method === 'imagick' ) {
+                if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
+                    @exec( 'magick -version', $o2, $rv2 );
+                    if ( $rv2 === 0 ) {
+                        $cmd = sprintf( 'magick %s -quality %d %s', escapeshellarg( $source ), $quality, escapeshellarg( $dest ) );
+                        @exec( $cmd, $out2, $ret2 );
+                        if ( $ret2 === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+                        $errors[] = 'magick failed';
+                    } else $errors[] = 'magick missing';
+                } else $errors[] = 'exec disabled';
+            } elseif ( $method === 'gd' ) {
+                if ( function_exists( 'imageavif' ) ) {
+                    $content = @file_get_contents( $source );
+                    if ( $content ) {
+                        $img = @imagecreatefromstring( $content );
+                        if ( $img ) {
+                            if ( $src_ext === 'png' ) {
+                                imagepalettetotruecolor( $img );
+                                imagealphablending( $img, true );
+                                imagesavealpha( $img, true );
+                            }
+                            $ok = @imageavif( $img, $dest, $quality );
+                            @imagedestroy( $img );
+                            if ( $ok && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+                            $errors[] = 'gd write failed';
+                        } else $errors[] = 'gd decode failed';
+                    } else $errors[] = 'read failed';
+                } else $errors[] = 'PHP 8.1+ imageavif() missing';
             }
-            $GLOBALS['henkan_last_error'] = 'exec not available';
-            return false;
         }
+        $GLOBALS['henkan_last_error'] = implode( ' | ', array_unique( $errors ) );
+        return false;
+    }
 
-        if ( $conv === 'imagick' ) {
-            if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                @exec( 'magick -version', $o2, $rv2 );
-                if ( $rv2 === 0 ) {
-                    $cmd = sprintf( 'magick %s -quality %d %s', escapeshellarg( $source ), $quality, escapeshellarg( $dest ) );
-                    @exec( $cmd, $out2, $ret2 );
-                    if ( $ret2 === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
-                    $GLOBALS['henkan_last_error'] = 'magick failed';
-                    return false;
-                }
-
-                @exec( 'convert -version', $o3, $rv3 );
-                if ( $rv3 === 0 ) {
-                    $cmd = sprintf( 'convert %s -quality %d %s', escapeshellarg( $source ), $quality, escapeshellarg( $dest ) );
-                    @exec( $cmd, $out3, $ret3 );
-                    if ( $ret3 === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
-                    $GLOBALS['henkan_last_error'] = 'convert failed';
-                    return false;
-                }
-
-                $GLOBALS['henkan_last_error'] = 'ImageMagick not available';
-                return false;
+    // JXL ENGINE WITH FALLBACKS
+    if ( $target_ext === 'jxl' ) {
+        $pref = isset( $settings['jxl_converter'] ) ? $settings['jxl_converter'] : 'cjxl';
+        $methods = array_unique( [ $pref, 'cjxl', 'imagick' ] );
+        $errors = [];
+        foreach ( $methods as $method ) {
+            if ( $method === 'cjxl' ) {
+                if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
+                    @exec( 'cjxl --version', $o, $rv );
+                    if ( $rv === 0 ) {
+                        $cmd = sprintf( 'cjxl %s %s -q %d', escapeshellarg( $source ), escapeshellarg( $dest ), $quality );
+                        @exec( $cmd, $out, $ret );
+                        if ( $ret === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+                        $errors[] = 'cjxl failed';
+                    } else $errors[] = 'cjxl missing';
+                } else $errors[] = 'exec disabled';
+            } elseif ( $method === 'imagick' ) {
+                if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
+                    @exec( 'magick -version', $o2, $rv2 );
+                    if ( $rv2 === 0 ) {
+                        $cmd = sprintf( 'magick %s -quality %d %s', escapeshellarg( $source ), $quality, escapeshellarg( $dest ) );
+                        @exec( $cmd, $out2, $ret2 );
+                        if ( $ret2 === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+                        $errors[] = 'magick failed';
+                    } else $errors[] = 'magick missing';
+                } else $errors[] = 'exec disabled';
             }
-            $GLOBALS['henkan_last_error'] = 'exec not available';
-            return false;
         }
-
-        if ( $conv === 'gd' ) {
-            if ( ! function_exists( 'imageavif' ) ) {
-                $GLOBALS['henkan_last_error'] = 'GD imageavif() not available';
-                return false;
-            }
-            $content = @file_get_contents( $source );
-            if ( ! $content ) { $GLOBALS['henkan_last_error'] = 'read source failed'; return false; }
-
-            $img = @imagecreatefromstring( $content );
-            if ( ! $img ) { $GLOBALS['henkan_last_error'] = 'imagecreatefromstring failed'; return false; }
-
-            if ( $src_ext === 'png' ) {
-                imagepalettetotruecolor( $img );
-                imagealphablending( $img, true );
-                imagesavealpha( $img, true );
-            }
-
-            $ok = @imageavif( $img, $dest, $quality );
-            @imagedestroy( $img );
-
-            if ( $ok && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
-            $GLOBALS['henkan_last_error'] = 'GD imageavif failed';
-            return false;
-        }
-
-        $GLOBALS['henkan_last_error'] = 'Unknown AVIF converter';
+        $GLOBALS['henkan_last_error'] = implode( ' | ', array_unique( $errors ) );
         return false;
     }
 
@@ -246,52 +270,86 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
 
 function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
     $settings = henkan_get_settings();
-    $fmt = henkan_target_format( $settings );
-    if ( $fmt === '' ) return false;
+    $fmts = henkan_target_formats( $settings );
+    if ( empty( $fmts ) ) return ['success' => false, 'generated' => [], 'failed' => []];
 
     $info = pathinfo( $path );
     $src_ext = strtolower( $info['extension'] );
-    if ( ! in_array( $src_ext, [ 'jpg', 'jpeg', 'png' ], true ) ) return false;
+    if ( ! in_array( $src_ext, [ 'jpg', 'jpeg', 'png' ], true ) ) return ['success' => false, 'generated' => [], 'failed' => []];
 
-    $target_path = $info['dirname'] . '/' . $info['filename'] . '.' . $fmt;
-    $success = henkan_create_image( $path, $target_path, $settings['quality'], $src_ext, $settings );
+    if ( function_exists('henkan_is_file_excluded') && henkan_is_file_excluded( $path ) ) return ['success' => false, 'generated' => [], 'failed' => ['excluded']];
+
+    $any_success = false;
+    $generated = [];
+    $failed = [];
+    
+    $meta = [];
+    if ( $id > 0 ) {
+        $meta = henkan_get_data( $id ) ?: [];
+        if ( ! is_array( $meta ) ) $meta = [];
+    }
+
+    foreach ( $fmts as $fmt ) {
+        $target_path = $info['dirname'] . '/' . $info['filename'] . '.' . $fmt;
+        $success = henkan_create_image( $path, $target_path, $settings['quality'], $src_ext, $settings );
+        if ( $success ) {
+            if ( ! isset( $meta[$size_name] ) ) $meta[$size_name] = [];
+            $meta[$size_name][$fmt] = basename( $target_path );
+            $any_success = true;
+            $generated[] = $fmt;
+        } else {
+            $err_reason = isset( $GLOBALS['henkan_last_error'] ) ? $GLOBALS['henkan_last_error'] : 'error';
+            $failed[] = $fmt . ' (' . $err_reason . ')';
+        }
+    }
 
     if ( $id > 0 && $update_db ) {
-        if ( $success && $size_name === 'original' ) {
-            $rel = get_post_meta( $id, '_wp_attached_file', true );
-            if ( $rel ) {
-                $new = preg_replace( '/\.(jpg|jpeg|png)$/i', '.' . $fmt, $rel );
-                update_post_meta( $id, '_wp_attached_file', $new );
-            }
-            wp_update_post( [ 'ID' => $id, 'post_mime_type' => henkan_target_mime( $fmt ) ] );
+        if ( $any_success && $size_name === 'original' ) {
             henkan_set_state( $id, 'ok', '' );
-        } elseif ( ! $success && $size_name === 'original' ) {
+
+            if ( empty( $settings['keep_original'] ) ) {
+                $primary_fmt = henkan_get_primary_format( $generated );
+                $rel = get_post_meta( $id, '_wp_attached_file', true );
+                if ( $rel && $primary_fmt !== '' ) {
+                    $new = preg_replace( '/\.(jpg|jpeg|png)$/i', '.' . $primary_fmt, $rel );
+                    update_post_meta( $id, '_wp_attached_file', $new );
+                }
+                if ( $primary_fmt !== '' ) {
+                    wp_update_post( [ 'ID' => $id, 'post_mime_type' => henkan_target_mime( $primary_fmt ) ] );
+                }
+            }
+        } elseif ( ! $any_success && $size_name === 'original' ) {
             $err = isset( $GLOBALS['henkan_last_error'] ) ? (string) $GLOBALS['henkan_last_error'] : '';
             henkan_set_state( $id, 'failed', $err );
         }
 
-        if ( $success ) {
-            $meta = get_post_meta( $id, '_henkan_converted_files', true ) ?: [];
-            $meta[ $size_name ][ $fmt ] = basename( $target_path );
-            update_post_meta( $id, '_henkan_converted_files', $meta );
-
-            if ( empty( $settings['keep_original'] ) ) wp_delete_file( $path );
+        if ( $any_success ) {
+            henkan_update_data( $id, $meta );
+            if ( empty( $settings['keep_original'] ) ) {
+                wp_delete_file( $path );
+            }
         }
     }
-    return $success;
+    return ['success' => $any_success, 'generated' => $generated, 'failed' => $failed];
 }
 
 add_action( 'delete_post', function( $pid ) {
-    $meta = get_post_meta( $pid, '_henkan_converted_files', true );
-    if ( $meta ) {
+    $meta = function_exists('henkan_get_data') ? henkan_get_data( $pid ) : false;
+    if ( $meta && is_array( $meta ) ) {
         $file = get_attached_file( $pid );
         if ( $file ) {
             $base = dirname( $file );
             foreach ( $meta as $files ) {
-                if ( isset( $files['webp'] ) ) wp_delete_file( $base . '/' . $files['webp'] );
+                if ( is_array( $files ) ) {
+                    if ( isset( $files['webp'] ) ) wp_delete_file( $base . '/' . $files['webp'] );
+                    if ( isset( $files['avif'] ) ) wp_delete_file( $base . '/' . $files['avif'] );
+                    if ( isset( $files['jxl'] ) ) wp_delete_file( $base . '/' . $files['jxl'] );
+                }
             }
         }
     }
+    global $wpdb;
+    $wpdb->delete( $wpdb->prefix . 'henkan_data', ['attachment_id' => $pid] );
 });
 
 function henkan_trigger_cache_clear() {
