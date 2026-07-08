@@ -1,10 +1,10 @@
 === Henkan - WebP & AVIF Converter ===
 Contributors: Saguya
 Tags: webp, avif, image optimization, pagespeed, converter
-Requires at least: 6.0
+Requires at least: 6.9
 Tested up to: 7.0
-Stable tag: 2.2.0
-Requires PHP: 8.3
+Stable tag: 2.3.2
+Requires PHP: 8.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,8 +34,8 @@ Most image optimizers rely on slow PHP processing or expensive cloud APIs with m
 ### 🛠️ System Requirements
 
 To unleash the full speed of Henkan, we recommend:
-* **WordPress:** 6.0 or higher
-* **PHP:** 7.4 or higher
+* **WordPress:** 6.9 or higher
+* **PHP:** 8.4 or higher
 * **For WebP:** `cwebp` installed on the server (recommended) OR PHP `GD` extension with WebP support.
 * **For AVIF:** `avifenc` or `ImageMagick` (magick/convert) installed OR PHP `GD` extension with AVIF support.
 
@@ -69,6 +69,17 @@ For large media libraries, using the terminal is highly recommended.
 3. Seamless integration into the WordPress Media Library.
 
 == Changelog ==
+
+= 2.3.2 =
+* **Fix Readme
+
+= 2.3.0 =
+* **New tab: Smart Options. A dedicated "Smart Options" tab has been added to the plugin dashboard. It groups all optional, advanced features behind individual toggles that are disabled by default. Existing setups are completely unaffected unless a feature is explicitly activated.
+* **Smart Option: Quality by Image Size. Allows a separate, lower quality value to be applied to WordPress-generated thumbnail crop sizes (e.g. thumbnail, medium, medium_large) while the global quality setting continues to apply to full-size originals. The feature uses wp_get_registered_image_subsizes() to determine whether a given image size is an actual WordPress crop — custom single-resolution setups where WordPress thumbnail generation is not used are not affected even if the toggle is enabled.
+* **Smart Option: Integrity Check. Adds a daily WP-Cron job that verifies whether converted files recorded in the wp_henkan_data table still physically exist on disk. Any entry whose files are no longer present is removed from the database, causing the image to be re-queued for conversion on the next bulk scan. The Smart Options tab displays the date of the last run and the number of missing files found. Particularly useful after server migrations or accidental file deletions.
+* **Smart Option: Max Output Width. Optionally limits the pixel width of converted output files. If an uploaded image exceeds the configured maximum width, it is scaled down proportionally before conversion. The original file is never modified — only the converted WebP/AVIF/JXL output is resized. Aspect ratio is always preserved. Images already narrower than the configured value are not affected.
+* **Conversion Statistics panel. A new read-only statistics panel in the Smart Options tab shows the total number of converted images and the cumulative disk space saved. Also introduces the wp henkan stats WP-CLI command for the same information from the terminal.
+* **New WP-CLI command: wp henkan stats. Outputs a summary of total converted images and space saved directly from the terminal.
 
 = 2.2.0 =
 * **Tested up to:** WordPress 7.0

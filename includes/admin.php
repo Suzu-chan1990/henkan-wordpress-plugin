@@ -86,7 +86,14 @@ function henkan_sanitize_settings( $input ) {
     $clean = [];
     $defaults = henkan_default_settings();
     
-    $bool_keys = [ 'enable_webp', 'enable_avif', 'enable_jxl', 'keep_original', 'picture_filter_enabled', 'enable_lazy_loading', 'debug', 'auto_clear_cache', 'scan_uploads_dir', 'scan_theme_dir', 'bulk_only_unconverted', 'enable_bg_queue' ];
+    $bool_keys = [
+        'enable_webp', 'enable_avif', 'enable_jxl', 'keep_original',
+        'picture_filter_enabled', 'enable_lazy_loading', 'debug',
+        'auto_clear_cache', 'scan_uploads_dir', 'scan_theme_dir',
+        'bulk_only_unconverted', 'enable_bg_queue',
+        // Smart Options
+        'smart_quality_enabled', 'integrity_check_enabled', 'max_width_enabled',
+    ];
     foreach ( $bool_keys as $key ) {
         $clean[ $key ] = ! empty( $input[ $key ] ) ? 1 : 0;
     }
@@ -95,7 +102,11 @@ function henkan_sanitize_settings( $input ) {
     $clean['quality'] = max( 1, min( 100, $quality ) );
     $clean['batch_size'] = isset( $input['batch_size'] ) ? absint( $input['batch_size'] ) : $defaults['batch_size'];
     $clean['custom_folders'] = isset( $input['custom_folders'] ) ? sanitize_textarea_field( wp_unslash( $input['custom_folders'] ) ) : '';
-    $clean['exclusions'] = isset( $input['exclusions'] ) ? sanitize_textarea_field( wp_unslash( $input['exclusions'] ) ) : '';
+    $clean['exclusions']     = isset( $input['exclusions'] ) ? sanitize_textarea_field( wp_unslash( $input['exclusions'] ) ) : '';
+
+    // Smart Options – numerische Werte
+    $clean['smart_quality_thumb'] = isset( $input['smart_quality_thumb'] ) ? max( 1, min( 100, absint( $input['smart_quality_thumb'] ) ) ) : 70;
+    $clean['max_width_px']        = isset( $input['max_width_px'] ) ? max( 100, min( 10000, absint( $input['max_width_px'] ) ) ) : 2000;
 
     $webp_allowed = [ 'cwebp', 'gd' ];
     $avif_allowed = [ 'avifenc', 'imagick', 'gd' ];
@@ -180,7 +191,7 @@ function henkan_admin_page() {
     ?>
     <div class="wrap henkan-wrap">
         <div class="henkan-header">
-            <div class="header-title"><h1><?php esc_html_e( 'Henkan', 'henkan-webp-avif-converter' ); ?> <span class="version">v2.2.0</span></h1></div>
+            <div class="header-title"><h1><?php esc_html_e( 'Henkan', 'henkan-webp-avif-converter' ); ?> <span class="version">v2.3.2</span></h1></div>
             <div class="header-branding"><span class="dashicons dashicons-format-image" style="font-size:40px; width:40px; height:40px; color:#ccc;"></span></div>
         </div>
         <div class="henkan-grid top-stats">
@@ -200,6 +211,7 @@ function henkan_admin_page() {
                         <button type="button" class="main-tab-btn" data-target="advanced" style="flex: 1; padding: 15px; border: none; background: none; cursor: pointer; font-weight: 600; border-bottom: 2px solid transparent; transition: all 0.2s;"><?php esc_html_e( 'Advanced', 'henkan-webp-avif-converter' ); ?></button>
                         <button type="button" class="main-tab-btn" data-target="rewrites" style="flex: 1; padding: 15px; border: none; background: none; cursor: pointer; font-weight: 600; border-bottom: 2px solid transparent; transition: all 0.2s;"><?php esc_html_e( 'Server Rewrites', 'henkan-webp-avif-converter' ); ?></button>
                         <button type="button" class="main-tab-btn" data-target="cli" style="flex: 1; padding: 15px; border: none; background: none; cursor: pointer; font-weight: 600; border-bottom: 2px solid transparent; transition: all 0.2s;"><?php esc_html_e( 'WP-CLI', 'henkan-webp-avif-converter' ); ?></button>
+                        <button type="button" class="main-tab-btn" data-target="smart" style="flex: 1; padding: 15px; border: none; background: none; cursor: pointer; font-weight: 600; border-bottom: 2px solid transparent; transition: all 0.2s;"><?php esc_html_e( 'Smart Options', 'henkan-webp-avif-converter' ); ?> <span style="background:#8a2be2; color:#fff; font-size:9px; padding:1px 5px; border-radius:3px; vertical-align:middle;">NEW</span></button>
                     </div>
 
                     <div style="padding: 20px;">
@@ -339,6 +351,169 @@ location ~* ^.+\.(png|jpe?g)$ {
                                 <p><strong><?php esc_html_e( 'Force all:', 'henkan-webp-avif-converter' ); ?></strong><br><code>wp henkan convert --force</code></p>
                             </div>
                         </div>
+
+                        <?php // ============================================================
+                        // SMART OPTIONS TAB
+                        // Alle neuen Features als optionale Toggles.
+                        // Standardmäßig DEAKTIVIERT – kein Einfluss auf bestehende Setups.
+                        // ============================================================ ?>
+                        <div id="main-tab-smart" class="main-tab-content" style="display: none;">
+                            <h2 style="margin-top:0; border-bottom:none; padding-bottom:0; font-size:1.2em;"><?php esc_html_e( 'Smart Options', 'henkan-webp-avif-converter' ); ?></h2>
+                            <p style="color:#666; font-size:13px; margin-bottom:20px;"><?php esc_html_e( 'Optional features for advanced use cases. All options are disabled by default and have no effect on existing setups unless explicitly activated.', 'henkan-webp-avif-converter' ); ?></p>
+
+                            <form method="post" action="options.php">
+                                <?php settings_fields( 'henkan_settings_group' ); ?>
+
+                                <?php
+                                // Alle bestehenden Settings als Hidden-Fields mitschicken,
+                                // damit sie beim Speichern dieses Tabs nicht verloren gehen.
+                                $hidden_keys = [
+                                    'enable_webp', 'enable_avif', 'enable_jxl',
+                                    'webp_converter', 'avif_converter', 'jxl_converter',
+                                    'keep_original', 'quality', 'debug', 'batch_size',
+                                    'bulk_only_unconverted', 'picture_filter_enabled',
+                                    'enable_lazy_loading', 'enable_bg_queue', 'auto_clear_cache',
+                                    'scan_uploads_dir', 'scan_theme_dir', 'custom_folders', 'exclusions',
+                                ];
+                                foreach ( $hidden_keys as $hk ) {
+                                    $hv = isset( $s[ $hk ] ) ? $s[ $hk ] : '';
+                                    echo '<input type="hidden" name="henkan_settings[' . esc_attr( $hk ) . ']" value="' . esc_attr( $hv ) . '">';
+                                }
+                                ?>
+
+                                <?php // ---- SEKTION 1: QUALITÄT NACH BILDGRÖSSE ---- ?>
+                                <div class="henkan-card" style="margin-bottom:20px; border-left: 3px solid #2271b1;">
+                                    <h3 style="margin-top:0; font-size:1em; display:flex; align-items:center; gap:8px;">
+                                        <?php esc_html_e( 'Quality by Image Size', 'henkan-webp-avif-converter' ); ?>
+                                        <span style="background:#2271b1; color:#fff; font-size:9px; padding:1px 6px; border-radius:3px;"><?php esc_html_e( 'Optional', 'henkan-webp-avif-converter' ); ?></span>
+                                    </h3>
+                                    <p style="color:#666; font-size:12px; margin-bottom:15px;">
+                                        <?php esc_html_e( 'Apply a lower quality to WordPress-generated thumbnail sizes (thumbnail, medium, medium_large) to save disk space. Full-size images always use the global quality setting above. Only activates if WordPress thumbnail sizes are actually in use — sites using a single custom resolution are not affected.', 'henkan-webp-avif-converter' ); ?>
+                                    </p>
+                                    <label class="henkan-toggle" style="margin-bottom:15px;">
+                                        <input type="checkbox" name="henkan_settings[smart_quality_enabled]" value="1" <?php checked( 1, $s['smart_quality_enabled'] ?? 0 ); ?>>
+                                        <span class="slider"></span>
+                                        <span class="label-text"><strong><?php esc_html_e( 'Enable Quality by Image Size', 'henkan-webp-avif-converter' ); ?></strong></span>
+                                    </label>
+                                    <?php if ( ! empty( $s['smart_quality_enabled'] ) ) : ?>
+                                    <div style="background:#f9f9f9; padding:12px; border-radius:4px; border:1px solid #eee; margin-top:10px;">
+                                        <div style="display:grid; grid-template-columns: 220px 80px; gap:8px; align-items:center;">
+                                            <label style="font-size:13px;"><?php esc_html_e( 'Quality for WordPress thumbnails', 'henkan-webp-avif-converter' ); ?> <small style="color:#999;">(thumbnail, medium, medium_large)</small></label>
+                                            <input type="number" name="henkan_settings[smart_quality_thumb]" value="<?php echo esc_attr( $s['smart_quality_thumb'] ?? 70 ); ?>" min="1" max="100" class="small-text">
+                                        </div>
+                                        <p style="font-size:11px; color:#999; margin:8px 0 0;">
+                                            <?php esc_html_e( 'This setting only applies if WordPress actually generates these crop sizes. If you use a single resolution (no cropping), this has no effect regardless.', 'henkan-webp-avif-converter' ); ?>
+                                        </p>
+                                    </div>
+                                    <?php else : ?>
+                                    <p style="font-size:11px; color:#999; margin:0;"><?php esc_html_e( 'Enable to configure thumbnail quality.', 'henkan-webp-avif-converter' ); ?></p>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php // ---- SEKTION 2: INTEGRITÄTS-CHECK ---- ?>
+                                <div class="henkan-card" style="margin-bottom:20px; border-left: 3px solid #46b450;">
+                                    <h3 style="margin-top:0; font-size:1em; display:flex; align-items:center; gap:8px;">
+                                        <?php esc_html_e( 'Integrity Check', 'henkan-webp-avif-converter' ); ?>
+                                        <span style="background:#46b450; color:#fff; font-size:9px; padding:1px 6px; border-radius:3px;"><?php esc_html_e( 'Optional', 'henkan-webp-avif-converter' ); ?></span>
+                                    </h3>
+                                    <p style="color:#666; font-size:12px; margin-bottom:15px;">
+                                        <?php esc_html_e( 'Runs a background check (WP-Cron) that verifies whether converted files recorded in the Henkan database still physically exist on disk. Missing files are automatically re-queued for conversion. Useful after server migrations or accidental file deletions.', 'henkan-webp-avif-converter' ); ?>
+                                    </p>
+                                    <label class="henkan-toggle" style="margin-bottom:10px;">
+                                        <input type="checkbox" name="henkan_settings[integrity_check_enabled]" value="1" <?php checked( 1, $s['integrity_check_enabled'] ?? 0 ); ?>>
+                                        <span class="slider"></span>
+                                        <span class="label-text"><strong><?php esc_html_e( 'Enable Automatic Integrity Check', 'henkan-webp-avif-converter' ); ?></strong></span>
+                                    </label>
+                                    <?php if ( ! empty( $s['integrity_check_enabled'] ) ) :
+                                        $last_run = get_option( 'henkan_integrity_last_run', 0 );
+                                        $missing  = (int) get_option( 'henkan_integrity_missing_count', 0 );
+                                    ?>
+                                    <div style="background:#f9f9f9; padding:12px; border-radius:4px; border:1px solid #eee; margin-top:10px; font-size:12px;">
+                                        <p style="margin:0 0 5px;">
+                                            <strong><?php esc_html_e( 'Last run:', 'henkan-webp-avif-converter' ); ?></strong>
+                                            <?php echo $last_run ? esc_html( wp_date( get_option( 'date_format' ) . ' ' . get_option( 'time_format' ), $last_run ) ) : esc_html__( 'Never', 'henkan-webp-avif-converter' ); ?>
+                                        </p>
+                                        <p style="margin:0; color:<?php echo $missing > 0 ? '#d63638' : '#46b450'; ?>;">
+                                            <strong><?php esc_html_e( 'Missing files found:', 'henkan-webp-avif-converter' ); ?></strong> <?php echo esc_html( $missing ); ?>
+                                        </p>
+                                    </div>
+                                    <?php else : ?>
+                                    <p style="font-size:11px; color:#999; margin:0;"><?php esc_html_e( 'Runs automatically once per day via WP-Cron when enabled.', 'henkan-webp-avif-converter' ); ?></p>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php // ---- SEKTION 3: MAXIMALE AUSGABEBREITE ---- ?>
+                                <div class="henkan-card" style="margin-bottom:20px; border-left: 3px solid #f0b849;">
+                                    <h3 style="margin-top:0; font-size:1em; display:flex; align-items:center; gap:8px;">
+                                        <?php esc_html_e( 'Max Output Width', 'henkan-webp-avif-converter' ); ?>
+                                        <span style="background:#f0b849; color:#fff; font-size:9px; padding:1px 6px; border-radius:3px;"><?php esc_html_e( 'Optional', 'henkan-webp-avif-converter' ); ?></span>
+                                    </h3>
+                                    <p style="color:#666; font-size:12px; margin-bottom:15px;">
+                                        <?php esc_html_e( 'Automatically resize images during conversion if they exceed a defined maximum width. Applies only to the converted output file — originals are always preserved if "Keep Originals" is enabled. Useful when images are uploaded at 4000px+ but never displayed wider than 1200px.', 'henkan-webp-avif-converter' ); ?>
+                                    </p>
+                                    <label class="henkan-toggle" style="margin-bottom:15px;">
+                                        <input type="checkbox" name="henkan_settings[max_width_enabled]" value="1" <?php checked( 1, $s['max_width_enabled'] ?? 0 ); ?>>
+                                        <span class="slider"></span>
+                                        <span class="label-text"><strong><?php esc_html_e( 'Enable Max Output Width', 'henkan-webp-avif-converter' ); ?></strong></span>
+                                    </label>
+                                    <?php if ( ! empty( $s['max_width_enabled'] ) ) : ?>
+                                    <div style="background:#f9f9f9; padding:12px; border-radius:4px; border:1px solid #eee; margin-top:10px;">
+                                        <div style="display:grid; grid-template-columns: 220px 100px; gap:8px; align-items:center;">
+                                            <label style="font-size:13px;"><?php esc_html_e( 'Maximum width (px)', 'henkan-webp-avif-converter' ); ?></label>
+                                            <input type="number" name="henkan_settings[max_width_px]" value="<?php echo esc_attr( $s['max_width_px'] ?? 2000 ); ?>" min="100" max="10000" step="100" class="small-text">
+                                        </div>
+                                        <p style="font-size:11px; color:#999; margin:8px 0 0;">
+                                            <?php esc_html_e( 'Images already narrower than this value are not resized. Aspect ratio is always preserved.', 'henkan-webp-avif-converter' ); ?>
+                                        </p>
+                                    </div>
+                                    <?php else : ?>
+                                    <p style="font-size:11px; color:#999; margin:0;"><?php esc_html_e( 'Enable to set a maximum pixel width for converted output files.', 'henkan-webp-avif-converter' ); ?></p>
+                                    <?php endif; ?>
+                                </div>
+
+                                <?php // ---- SEKTION 4: CLI STATS KOMMANDO ---- ?>
+                                <div class="henkan-card" style="margin-bottom:20px; border-left: 3px solid #8a2be2;">
+                                    <h3 style="margin-top:0; font-size:1em; display:flex; align-items:center; gap:8px;">
+                                        <?php esc_html_e( 'Conversion Statistics', 'henkan-webp-avif-converter' ); ?>
+                                        <span style="background:#8a2be2; color:#fff; font-size:9px; padding:1px 6px; border-radius:3px;"><?php esc_html_e( 'Info', 'henkan-webp-avif-converter' ); ?></span>
+                                    </h3>
+                                    <p style="color:#666; font-size:12px; margin-bottom:15px;">
+                                        <?php esc_html_e( 'A summary of space savings achieved through conversion. Available via WP-CLI and shown here as a live overview.', 'henkan-webp-avif-converter' ); ?>
+                                    </p>
+                                    <?php
+                                    // Live-Statistik aus wp_henkan_data berechnen
+                                    global $wpdb;
+                                    $henkan_tbl = $wpdb->prefix . 'henkan_data';
+                                    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+                                    $total_converted = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $henkan_tbl" );
+
+                                    $savings_bytes = (int) get_option( 'henkan_total_savings_bytes', 0 );
+                                    $savings_mb    = $savings_bytes > 0 ? round( $savings_bytes / 1048576, 2 ) : 0;
+                                    ?>
+                                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                                        <div style="background:#f9f9f9; padding:15px; border-radius:4px; border:1px solid #eee; text-align:center;">
+                                            <strong style="font-size:1.8em; display:block; color:#2271b1;"><?php echo esc_html( number_format( $total_converted ) ); ?></strong>
+                                            <small style="color:#666;"><?php esc_html_e( 'Images converted', 'henkan-webp-avif-converter' ); ?></small>
+                                        </div>
+                                        <div style="background:#f9f9f9; padding:15px; border-radius:4px; border:1px solid #eee; text-align:center;">
+                                            <strong style="font-size:1.8em; display:block; color:#46b450;"><?php echo esc_html( $savings_mb > 0 ? $savings_mb . ' MB' : '—' ); ?></strong>
+                                            <small style="color:#666;"><?php esc_html_e( 'Space saved', 'henkan-webp-avif-converter' ); ?></small>
+                                        </div>
+                                    </div>
+                                    <div style="margin-top:12px;" class="henkan-cli-box">
+                                        <p style="margin:0;"><strong><?php esc_html_e( 'Via WP-CLI:', 'henkan-webp-avif-converter' ); ?></strong><br><code>wp henkan stats</code></p>
+                                    </div>
+                                </div>
+
+                                <div style="margin-top:10px;">
+                                    <?php submit_button( __( 'Save Smart Options', 'henkan-webp-avif-converter' ) ); ?>
+                                </div>
+
+                            </form>
+                        </div>
+                        <?php // ============================================================
+                        // ENDE SMART OPTIONS TAB
+                        // ============================================================ ?>
 
                     </div>
                 </div>

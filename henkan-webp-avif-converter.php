@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 2.2.0
+ * Version: 2.3.2
  * Author: Saguya
  * Text Domain: henkan-webp-avif-converter
  * Domain Path: /languages
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Requires at least: 6.0
+ * Requires at least: 6.9
  * Requires PHP: 8.3
  */
 
@@ -35,10 +35,16 @@ function henkan_default_settings() {
         'enable_lazy_loading'    => 1,
         'enable_bg_queue'        => 0,
         'auto_clear_cache'       => 1,
-        'scan_uploads_dir'       => 1,
-        'scan_theme_dir'         => 0,
-        'custom_folders'         => '',
-        'exclusions'             => '',
+        'scan_uploads_dir'         => 1,
+        'scan_theme_dir'           => 0,
+        'custom_folders'           => '',
+        'exclusions'               => '',
+        // Smart Options – alle standardmäßig deaktiviert
+        'smart_quality_enabled'    => 0,
+        'smart_quality_thumb'      => 70,
+        'integrity_check_enabled'  => 0,
+        'max_width_enabled'        => 0,
+        'max_width_px'             => 2000,
     ];
 }
 
@@ -73,6 +79,63 @@ function henkan_log( $msg ) {
     if ( defined( 'WP_DEBUG' ) && WP_DEBUG && ! empty( $s['debug'] ) ) {
         // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log, WordPress.PHP.DevelopmentFunctions.error_log_print_r
         error_log( '[Henkan] ' . ( is_scalar( $msg ) ? $msg : print_r( $msg, true ) ) );
+    }
+}
+
+// ============================================================
+// Smart Options: Integrity Check Cron
+// ============================================================
+add_action( 'henkan_integrity_check_event', 'henkan_run_integrity_check' );
+
+function henkan_run_integrity_check() {
+    $s = henkan_get_settings();
+    if ( empty( $s['integrity_check_enabled'] ) ) return;
+
+    global $wpdb;
+    $table   = $wpdb->prefix . 'henkan_data';
+    $missing = 0;
+
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+    $rows = $wpdb->get_results( "SELECT attachment_id, data FROM $table", ARRAY_A );
+
+    foreach ( $rows as $row ) {
+        $data = maybe_unserialize( $row['data'] );
+        if ( ! is_array( $data ) ) continue;
+
+        $all_missing = true;
+        foreach ( $data as $size => $formats ) {
+            if ( ! is_array( $formats ) ) continue;
+            foreach ( $formats as $fmt => $filename ) {
+                $file = get_attached_file( $row['attachment_id'] );
+                if ( ! $file ) continue;
+                $path = dirname( $file ) . '/' . $filename;
+                if ( file_exists( $path ) ) {
+                    $all_missing = false;
+                    break 2;
+                }
+            }
+        }
+
+        if ( $all_missing ) {
+            // Datensatz löschen → Bild wird beim nächsten Scan neu konvertiert
+            henkan_update_data( $row['attachment_id'], [] );
+            $missing++;
+        }
+    }
+
+    update_option( 'henkan_integrity_last_run', time() );
+    update_option( 'henkan_integrity_missing_count', $missing );
+}
+
+// Cron aktivieren/deaktivieren je nach Option
+add_action( 'update_option_henkan_settings', 'henkan_update_integrity_cron', 10, 2 );
+function henkan_update_integrity_cron( $old, $new ) {
+    if ( ! empty( $new['integrity_check_enabled'] ) ) {
+        if ( ! wp_next_scheduled( 'henkan_integrity_check_event' ) ) {
+            wp_schedule_event( time(), 'daily', 'henkan_integrity_check_event' );
+        }
+    } else {
+        wp_clear_scheduled_hook( 'henkan_integrity_check_event' );
     }
 }
 

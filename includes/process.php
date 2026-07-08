@@ -268,6 +268,74 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
     return false;
 }
 
+/**
+ * Smart Option: Max Output Width
+ * Skaliert das Quellbild vor der Konversion auf max. $max_width Pixel Breite,
+ * falls es breiter ist. Gibt den Pfad zur (ggf. temporären) Quelldatei zurück.
+ * Die Originaldatei wird niemals verändert.
+ *
+ * @param string $source    Pfad zur Originaldatei.
+ * @param int    $max_width Maximale Breite in Pixel.
+ * @param string $src_ext   Dateiendung (jpg/jpeg/png).
+ * @return string Pfad zur skalierten Datei (temporär) oder zur Originaldatei.
+ */
+function henkan_maybe_resize_for_conversion( $source, $max_width, $src_ext ) {
+    if ( $max_width <= 0 ) return $source;
+
+    $img = null;
+    if ( in_array( $src_ext, [ 'jpg', 'jpeg' ], true ) && function_exists( 'imagecreatefromjpeg' ) ) {
+        $img = @imagecreatefromjpeg( $source );
+    } elseif ( $src_ext === 'png' && function_exists( 'imagecreatefrompng' ) ) {
+        $img = @imagecreatefrompng( $source );
+    }
+
+    if ( ! $img ) return $source;
+
+    $orig_w = imagesx( $img );
+    $orig_h = imagesy( $img );
+    imagedestroy( $img );
+
+    if ( $orig_w <= $max_width ) return $source; // Bild ist bereits schmal genug
+
+    // Skalierung berechnen (Seitenverhältnis beibehalten)
+    $new_w = $max_width;
+    $new_h = (int) round( $orig_h * ( $max_width / $orig_w ) );
+
+    // Temporäre Datei anlegen
+    $tmp = sys_get_temp_dir() . '/henkan_resize_' . md5( $source ) . '.' . $src_ext;
+
+    $resized = imagecreatetruecolor( $new_w, $new_h );
+    if ( ! $resized ) return $source;
+
+    // PNG-Transparenz erhalten
+    if ( $src_ext === 'png' ) {
+        imagealphablending( $resized, false );
+        imagesavealpha( $resized, true );
+        $transparent = imagecolorallocatealpha( $resized, 0, 0, 0, 127 );
+        imagefilledrectangle( $resized, 0, 0, $new_w, $new_h, $transparent );
+    }
+
+    if ( in_array( $src_ext, [ 'jpg', 'jpeg' ], true ) ) {
+        $orig_img = @imagecreatefromjpeg( $source );
+    } else {
+        $orig_img = @imagecreatefrompng( $source );
+    }
+
+    if ( ! $orig_img ) { imagedestroy( $resized ); return $source; }
+
+    imagecopyresampled( $resized, $orig_img, 0, 0, 0, 0, $new_w, $new_h, $orig_w, $orig_h );
+    imagedestroy( $orig_img );
+
+    if ( in_array( $src_ext, [ 'jpg', 'jpeg' ], true ) ) {
+        @imagejpeg( $resized, $tmp, 95 );
+    } else {
+        @imagepng( $resized, $tmp, 0 );
+    }
+    imagedestroy( $resized );
+
+    return file_exists( $tmp ) ? $tmp : $source;
+}
+
 function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
     $settings = henkan_get_settings();
     $fmts = henkan_target_formats( $settings );
@@ -278,6 +346,30 @@ function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
     if ( ! in_array( $src_ext, [ 'jpg', 'jpeg', 'png' ], true ) ) return ['success' => false, 'generated' => [], 'failed' => []];
 
     if ( function_exists('henkan_is_file_excluded') && henkan_is_file_excluded( $path ) ) return ['success' => false, 'generated' => [], 'failed' => ['excluded']];
+
+    // Smart Option: Max Output Width
+    $actual_source = $path;
+    if ( ! empty( $settings['max_width_enabled'] ) && ! empty( $settings['max_width_px'] ) ) {
+        $actual_source = henkan_maybe_resize_for_conversion( $path, (int) $settings['max_width_px'], $src_ext );
+    }
+
+    // Smart Option: Quality by Image Size
+    // Thumbnails (WP-Standard-Größen) bekommen eine niedrigere Qualität,
+    // ABER nur wenn die Option aktiviert ist UND es sich um eine bekannte WP-Crop-Größe handelt.
+    $quality = (int) $settings['quality'];
+    if (
+        ! empty( $settings['smart_quality_enabled'] ) &&
+        ! empty( $settings['smart_quality_thumb'] ) &&
+        $size_name !== 'original' &&
+        $size_name !== 'custom'
+    ) {
+        // Prüfen ob es eine registrierte WP-Thumbnail-Größe ist (nicht eine custom size)
+        $registered_sizes = wp_get_registered_image_subsizes();
+        if ( isset( $registered_sizes[ $size_name ] ) ) {
+            $quality = (int) $settings['smart_quality_thumb'];
+        }
+        // Falls die Größe NICHT in den registrierten WP-Sizes ist → globale Qualität beibehalten
+    }
 
     $any_success = false;
     $generated = [];
@@ -291,7 +383,7 @@ function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
 
     foreach ( $fmts as $fmt ) {
         $target_path = $info['dirname'] . '/' . $info['filename'] . '.' . $fmt;
-        $success = henkan_create_image( $path, $target_path, $settings['quality'], $src_ext, $settings );
+        $success = henkan_create_image( $actual_source, $target_path, $quality, $src_ext, $settings );
         if ( $success ) {
             if ( ! isset( $meta[$size_name] ) ) $meta[$size_name] = [];
             $meta[$size_name][$fmt] = basename( $target_path );
@@ -330,6 +422,11 @@ function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
             }
         }
     }
+    // Temporäre resize-Datei aufräumen, falls eine erstellt wurde
+    if ( $actual_source !== $path && file_exists( $actual_source ) ) {
+        @unlink( $actual_source );
+    }
+
     return ['success' => $any_success, 'generated' => $generated, 'failed' => $failed];
 }
 
