@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 2.4.2
+ * Version: 2.5.1
  * Author: Saguya
  * Text Domain: henkan-webp-avif-converter
  * Domain Path: /languages
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Requires at least: 7.0
+ * Requires at least: 7.1
  * Requires PHP: 8.4
  */
 
@@ -16,7 +16,7 @@ defined( 'ABSPATH' ) || exit;
 
 define( 'HENKAN_PATH', plugin_dir_path( __FILE__ ) );
 define( 'HENKAN_URL', plugin_dir_url( __FILE__ ) );
-define( 'HENKAN_VERSION', '2.4.2' );
+define( 'HENKAN_VERSION', '2.5.1' );
 
 // ABSOLUTELY NO FORMAT IS ACTIVE BY DEFAULT
 function henkan_default_settings() {
@@ -40,7 +40,7 @@ function henkan_default_settings() {
         'scan_theme_dir'           => 0,
         'custom_folders'           => '',
         'exclusions'               => '',
-        // Smart Options – alle standardmäßig deaktiviert
+        // Smart Options - all disabled by default
         'smart_quality_enabled'    => 0,
         'smart_quality_thumb'      => 70,
         'integrity_check_enabled'  => 0,
@@ -133,7 +133,7 @@ function henkan_run_integrity_check() {
         }
 
         if ( $all_missing ) {
-            // Datensatz löschen → Bild wird beim nächsten Scan neu konvertiert
+            // Delete the record -> the image is converted again on the next scan
             henkan_update_data( $row['attachment_id'], [] );
             $missing++;
         }
@@ -249,7 +249,7 @@ function henkan_enqueue_admin( $hook ) {
 
 // --- MEDIA LIBRARY SUPPORT FOR AVIF & JXL ---
 
-// 1. Erlaube Uploads und erkenne Mime-Types
+// 1. Allow uploads and register the mime types
 add_filter( 'upload_mimes', 'henkan_add_mimes' );
 function henkan_add_mimes( $mimes ) {
     if ( ! isset( $mimes['avif'] ) ) $mimes['avif'] = 'image/avif';
@@ -259,7 +259,7 @@ function henkan_add_mimes( $mimes ) {
     return $mimes;
 }
 
-// 2. Gruppiere sie als Bilder (damit sie im "Bilder"-Filter der Mediathek auftauchen)
+// 2. Group them as images (so they show up in the "Images" filter of the media library)
 add_filter( 'ext2type', 'henkan_add_ext2type' );
 function henkan_add_ext2type( $ext2type ) {
     if ( ! in_array( 'avif', $ext2type['image'] ) ) $ext2type['image'][] = 'avif';
@@ -267,7 +267,7 @@ function henkan_add_ext2type( $ext2type ) {
     return $ext2type;
 }
 
-// 3. Zwinge WP dazu, die Dateiendungen bei der Prüfung korrekt zu mappen
+// 3. Make WP map the file extensions correctly during the file type check
 add_filter( 'wp_check_filetype_and_ext', 'henkan_fix_mime_checks', 10, 4 );
 function henkan_fix_mime_checks( $data, $file, $filename, $mimes ) {
     $ext = strtolower( pathinfo( $filename, PATHINFO_EXTENSION ) );
@@ -288,13 +288,13 @@ function henkan_fix_mime_checks( $data, $file, $filename, $mimes ) {
     return $data;
 }
 
-// 4. Admin Grid Fallback: Zeige WebP in der Backend-Vorschau, falls der Browser kein JXL kann
+// 4. Admin grid fallback: show WebP in the backend preview if the browser cannot display JXL
 add_filter( 'wp_prepare_attachment_for_js', 'henkan_admin_thumbnail_fallback', 10, 3 );
 function henkan_admin_thumbnail_fallback( $response, $attachment, $meta ) {
     if ( isset( $response['mime'] ) && ( $response['mime'] === 'image/jxl' || $response['mime'] === 'image/avif' ) ) {
         $converted_meta = henkan_get_data( $attachment->ID );
         
-        // Die Reihenfolge, in der wir nach einer darstellbaren Vorschau suchen
+        // Order in which a displayable preview is searched
         $try_formats = ['webp', 'png', 'jpg', 'jpeg'];
         
         if ( ! empty( $converted_meta ) && is_array( $converted_meta ) ) {
@@ -307,7 +307,7 @@ function henkan_admin_thumbnail_fallback( $response, $attachment, $meta ) {
                     }
                 }
             }
-            // URLs der Thumbnails tauschen
+            // Swap the thumbnail URLs
             if ( isset( $response['sizes'] ) && is_array( $response['sizes'] ) ) {
                 foreach ( $response['sizes'] as $size_name => &$size_data ) {
                     if ( isset( $converted_meta[$size_name] ) ) {
@@ -331,7 +331,7 @@ function henkan_install_db() {
     global $wpdb;
     $table = $wpdb->prefix . 'henkan_data';
     
-    // Führe das Upgrade nur einmalig aus
+    // Run the upgrade only once
     if ( get_option('henkan_db_version') !== '2.2' ) {
         $charset_collate = $wpdb->get_charset_collate();
         $sql = "CREATE TABLE $table (

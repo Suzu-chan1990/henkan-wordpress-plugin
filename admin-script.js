@@ -15,13 +15,10 @@ jQuery(document).ready(function($) {
 
     // --- NEW MAIN TABS LOGIC ---
     $('.main-tab-btn').on('click', function() {
-        // Reset button styling
-        $('.main-tab-btn').css('border-bottom-color', 'transparent').css('color', 'inherit').removeClass('active');
-        // Highlight active button
-        $(this).css('border-bottom-color', '#2271b1').css('color', '#2271b1').addClass('active');
-        // Hide all content and show selected
-        $('.main-tab-content').hide();
-        $('#main-tab-' + $(this).data('target')).fadeIn(200);
+        $('.main-tab-btn').removeClass('active').attr('aria-selected', 'false');
+        $(this).addClass('active').attr('aria-selected', 'true');
+        $('.main-tab-content').prop('hidden', true);
+        $('#main-tab-' + $(this).data('target')).prop('hidden', false);
     });
 
     // --- INNER TABS LOGIC (APACHE / NGINX) ---
@@ -29,8 +26,8 @@ jQuery(document).ready(function($) {
         const wrapper = $(this).closest('.henkan-inner-tabs-container');
         wrapper.find('.henkan-tab-btn').removeClass('active');
         $(this).addClass('active');
-        wrapper.find('.henkan-tab-content').hide();
-        wrapper.find('#tab-' + $(this).data('target')).show();
+        wrapper.find('.henkan-tab-content').prop('hidden', true);
+        wrapper.find('#tab-' + $(this).data('target')).prop('hidden', false);
     });
 
     // Media Library Button Handler
@@ -69,7 +66,7 @@ jQuery(document).ready(function($) {
     $('#henkan_start_scan').click(function(e) {
         e.preventDefault();
         const btn = $(this);
-        btn.prop('disabled', true).text('Scanne...');
+        btn.prop('disabled', true).text('Scanning...');
         
         const bgQueue = !!henkan_ajax.enable_bg_queue;
         if (bgQueue) {
@@ -81,7 +78,7 @@ jQuery(document).ready(function($) {
             }, function(res) {
                 if(!res.success) { alert(res.data.msg || henkan_ajax.i18n.error); btn.prop('disabled', false); return; }
                 $('#henkan_scan_results').slideDown(); btn.hide(); $('#henkan_to_convert').text('Background Queue');
-                $('#henkan_status_text').text('Background Queue läuft…'); pollQueue();
+                $('#henkan_status_text').text('Background queue running...'); pollQueue();
             }).fail(function(){ alert('Server Error'); btn.prop('disabled', false); });
             return;
         }
@@ -99,7 +96,7 @@ jQuery(document).ready(function($) {
                 if(!res.success){ alert(res.data.msg || henkan_ajax.i18n.error); btn.prop('disabled',false); return; }
                 todoList=todoList.concat(res.data.items||[]); scannedTotal += res.data.total_scanned||0;
                 scanAfter=res.data.after_id||scanAfter; scanPhase=res.data.phase||'ids'; fsCursor=res.data.fs_cursor||0; $('#henkan_total_found').text(scannedTotal); $('#henkan_to_convert').text(todoList.length); $('#henkan_scan_results').show();
-                if(res.data.has_more){ $('#henkan_status_text').text('Scanne…'); scanPage(); return; }
+                if(res.data.has_more){ $('#henkan_status_text').text('Scanning...'); scanPage(); return; }
                 totalTodo=todoList.length; saveState(todoList,totalTodo); btn.text(henkan_ajax.i18n.starting).hide();
                 if(totalTodo===0) $('#henkan_status_text').text(henkan_ajax.i18n.done);
             }).fail(function(){ alert('Server Error'); btn.prop('disabled',false); });
@@ -110,7 +107,7 @@ jQuery(document).ready(function($) {
     function pollQueue() {
         $.post(henkan_ajax.ajax_url, {action:'henkan_queue_status',nonce:henkan_ajax.nonce_scan}, function(res){
             if(!res.success) return; const q=res.data.state||{};
-            $('#henkan_status_text').text(q.active ? ('Background Queue: '+(q.processed||0)+' verarbeitet') : 'Background Queue fertig.');
+            $('#henkan_status_text').text(q.active ? ('Background queue: '+(q.processed||0)+' processed') : 'Background queue finished.');
             if(q.active) setTimeout(pollQueue,3000); else $('.fill').css('width','100%');
         });
     }

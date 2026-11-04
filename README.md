@@ -1,9 +1,9 @@
 === Henkan - WebP & AVIF Converter ===
 Contributors: Saguya
 Tags: webp, avif, image optimization, pagespeed, converter
-Requires at least: 7.0
-Tested up to: 7.1
-Stable tag: 2.4.2
+Requires at least: 7.1
+Tested up to: 7.2
+Stable tag: 2.5.1
 Requires PHP: 8.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -34,7 +34,7 @@ Most image optimizers rely on slow PHP processing or expensive cloud APIs with m
 ### 🛠️ System Requirements
 
 To unleash the full speed of Henkan, we recommend:
-* **WordPress:** 7.0 or higher
+* **WordPress:** 7.1 or higher
 * **PHP:** 8.4 or higher
 * **For WebP:** `cwebp` installed on the server (recommended) OR PHP `GD` extension with WebP support.
 * **For AVIF:** `avifenc` or `ImageMagick` (magick/convert) installed OR PHP `GD` extension with AVIF support.
@@ -69,6 +69,25 @@ For large media libraries, using the terminal is highly recommended.
 3. Seamless integration into the WordPress Media Library.
 
 == Changelog ==
+
+= 2.5.1 =
+### Fixes
+* **Plugin images:** The 2.5.0 download contained an extra `header-banner.png` and the old banner and icon. The plugin now ships exactly two images, `assets/banner-772x250.png` (new banner) and `assets/icon-256x256.png` (new icon), and the settings page header shows `banner-772x250.png`.
+* **Smart Options / WP-CLI:** The command boxes use the same light blue-to-mint background as the header instead of black.
+
+= 2.5.0 =
+### New Admin Design
+* **New look:** The settings page has a new design in the style of the other Saguya plugins: light blue-to-mint header with the Henkan banner and version, stat cards, tab bar, cards for every section and toggles, buttons and progress ring in the Henkan colors (blue to emerald).
+* **Bulk optimization:** Shows "x of y images optimized" below the progress ring; the log is shown as a console.
+* **Server rewrites and WP-CLI:** Rules and commands are shown in dark code boxes; the Nginx rules are labeled with the block they belong in (`http` / `server`). `wp henkan repair` is listed in the WP-CLI tab.
+* **Notices:** "Settings saved" and other notices are shown below the header.
+* **Text:** The exclusions hint (now translatable) and the scan/queue status messages were German and are now English; all code comments are English.
+* The version in the page header comes from the plugin version (it showed 2.4.1).
+* The settings, their names and the conversion itself are unchanged.
+
+### Compatibility
+* **Requires at least:** WordPress 7.1 (plugin header, readme and requirements).
+* **Tested up to:** WordPress 7.2.
 
 = 2.4.2 =
 ### Fixes
