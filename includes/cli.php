@@ -1,6 +1,6 @@
 <?php
 if ( ! defined( 'ABSPATH' ) ) exit;
-if (!defined('WP_CLI') | !WP_CLI) return;
+if (!defined('WP_CLI') || !WP_CLI) return;
 
 class Henkan_CLI {
 
@@ -15,13 +15,13 @@ class Henkan_CLI {
 
     public function convert($args, $assoc_args) {
         $force = \WP_CLI\Utils\get_flag_value($assoc_args, 'force', false);
-        $limit = \WP_CLI\Utils\get_flag_value($assoc_args, 'limit', -1);
-        $offset = \WP_CLI\Utils\get_flag_value($assoc_args, 'offset', 0);
+        $limit = \WP_CLI\Utils\get_flag_value($assoc_args, 'limit', 100);
+        $after_id = \WP_CLI\Utils\get_flag_value($assoc_args, 'after-id', 0);
 
         $settings = henkan_get_settings();
         $process_all = $force ? true : !$settings['bulk_only_unconverted'];
 
-        $items = $this->get_items_to_process($process_all, $limit, $offset);
+        $items = $this->get_items_to_process($process_all, $limit, $after_id);
         $total = count($items);
 
         if ($total === 0) {
@@ -59,29 +59,37 @@ class Henkan_CLI {
         WP_CLI::success( __( 'Done.', 'henkan-webp-avif-converter' ) );
     }
 
-    private function get_items_to_process($process_all = false, $limit = -1, $offset = 0) {
-        $settings = henkan_get_settings();
-        $todo = [];
-        
-        $ids = get_posts([
-            'post_type' => 'attachment', 
-            'post_mime_type' => ['image/jpeg', 'image/png'], 
-            'posts_per_page' => $limit, 
-            'offset' => $offset,
-            'fields' => 'ids',
-            'orderby' => 'ID',
-            'order' => 'DESC'
-        ]);
-        
-        foreach ($ids as $id) {
-            if ($process_all) {
-                $todo[] = $id; 
-                continue;
-            }
-            if (!henkan_get_data($id)) {
-                $todo[] = $id;
-            }
-        }
+    /**
+     * Repairs thumbnails broken by bulk conversions of older versions ("Keep original" off).
+     *
+     * ## EXAMPLES
+     *     wp henkan repair
+     */
+    public function repair($args, $assoc_args) {
+        global $wpdb;
+        $last = 0; $fixed = 0; $checked = 0;
+        do {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- keyset paging over attachments (CLI)
+            $ids = $wpdb->get_col($wpdb->prepare("SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type='attachment' AND post_mime_type IN ('image/webp','image/avif','image/jxl') ORDER BY ID ASC LIMIT 500", $last));
+            foreach ($ids as $id) { $last = (int) $id; $checked++; if (henkan_repair_attachment_metadata($last)) $fixed++; }
+        } while (count($ids) === 500);
+        /* translators: 1: Number of repaired attachments, 2: Number of checked attachments */
+        WP_CLI::success( sprintf( __( 'Repaired %1$d of %2$d converted attachments.', 'henkan-webp-avif-converter' ), $fixed, $checked ) );
+    }
+
+    /**
+     * @param int $limit Max. attachments; -1 = all (used by "scan", which counts everything).
+     */
+    private function get_items_to_process($process_all = false, $limit = 100, $after_id = 0) {
+        $todo = []; $after_id = max(0, (int)$after_id);
+        $all = ((int) $limit) < 0;
+        $limit = $all ? 500 : min(500, max(1, (int)$limit));
+        global $wpdb;
+        do {
+            // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- keyset paging over attachments (CLI)
+            $ids = $wpdb->get_col($wpdb->prepare("SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type='attachment' AND post_mime_type IN ('image/jpeg','image/png') AND post_status='inherit' ORDER BY ID ASC LIMIT %d",$after_id,$limit));
+            foreach($ids as $id){ $id=(int)$id; $after_id=$id; if($process_all || !henkan_get_data($id)) $todo[]=$id; }
+        } while ($all && count($ids) === $limit);
         return $todo;
     }
 }

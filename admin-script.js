@@ -3,6 +3,13 @@ jQuery(document).ready(function($) {
     function saveState(todo, total){ try{ localStorage.setItem(HENKAN_BULK_STATE, JSON.stringify({todo, total, ts: Date.now()})); }catch(e){} }
     function loadState(){ try{ const raw=localStorage.getItem(HENKAN_BULK_STATE); if(!raw) return null; const st=JSON.parse(raw); if(!st||!Array.isArray(st.todo)) return null; return st; }catch(e){ return null; } }
     function clearState(){ try{ localStorage.removeItem(HENKAN_BULK_STATE);}catch(e){} }
+    // Render log lines as text only (never as HTML) to prevent XSS via file names
+    function logLine(text, color, bold){
+        const li = $('<li>').text(text);
+        if(color) li.css('color', color);
+        if(bold) li.css('font-weight', 'bold');
+        $('#henkan_log_list').prepend(li);
+    }
     const st0 = loadState();
     if(st0 && st0.todo.length>0){ $('#henkan_scan_results').show(); $('#henkan_to_convert').text(st0.todo.length); $('#henkan_resume_convert').show(); $('#henkan_status_text').text(henkan_ajax.i18n.ready_to_resume); }
 
@@ -64,41 +71,63 @@ jQuery(document).ready(function($) {
         const btn = $(this);
         btn.prop('disabled', true).text('Scanne...');
         
-        $.post(henkan_ajax.ajax_url, {
-            action: 'henkan_scan',
-            nonce: henkan_ajax.nonce_scan,
-            rescan_all: $('#henkan_bulk_rescan_all').is(':checked') ? 1 : 0,
-            bulk_only_unconverted: $('#henkan_bulk_only_unconverted').is(':checked') ? 1 : 0,
-            bulk_only_failed: $('#henkan_bulk_only_failed').is(':checked') ? 1 : 0
-        }, function(res) {
-            if(res.success) {
-                if(res.data.debug_log && res.data.debug_log.length > 0) {
-                    console.group("Henkan Scan Debug");
-                    res.data.debug_log.forEach(l => console.log(l));
-                    console.groupEnd();
-                }
+        const bgQueue = !!henkan_ajax.enable_bg_queue;
+        if (bgQueue) {
+            $.post(henkan_ajax.ajax_url, {
+                action: 'henkan_queue_start', nonce: henkan_ajax.nonce_scan,
+                rescan_all: $('#henkan_bulk_rescan_all').is(':checked') ? 1 : 0,
+                bulk_only_unconverted: $('#henkan_bulk_only_unconverted').is(':checked') ? 1 : 0,
+                bulk_only_failed: $('#henkan_bulk_only_failed').is(':checked') ? 1 : 0
+            }, function(res) {
+                if(!res.success) { alert(res.data.msg || henkan_ajax.i18n.error); btn.prop('disabled', false); return; }
+                $('#henkan_scan_results').slideDown(); btn.hide(); $('#henkan_to_convert').text('Background Queue');
+                $('#henkan_status_text').text('Background Queue läuft…'); pollQueue();
+            }).fail(function(){ alert('Server Error'); btn.prop('disabled', false); });
+            return;
+        }
 
-                todoList = res.data.items;
-                totalTodo = todoList.length;
-                saveState(todoList, totalTodo);
-                
-                $('#henkan_total_found').text(res.data.total_scanned);
-                $('#henkan_to_convert').text(totalTodo);
-                $('#henkan_scan_results').slideDown();
-                btn.text(henkan_ajax.i18n.starting).hide();
-                
-                if(totalTodo === 0) {
-                    $('#henkan_status_text').text(henkan_ajax.i18n.done);
-                }
-            } else {
-                alert(res.data.msg || henkan_ajax.i18n.error);
-                btn.prop('disabled', false).text('Scan starten');
-            }
-        });
+        // Scan phases: 'ids' (media library pages), then 'fs' (folder scan in time-boxed steps)
+        let scanAfter = 0, scannedTotal = 0, scanPhase = 'ids', fsCursor = 0;
+        todoList = [];
+        function scanPage() {
+            $.post(henkan_ajax.ajax_url, {
+                action:'henkan_scan', nonce:henkan_ajax.nonce_scan, after_id:scanAfter, per_page:100, phase:scanPhase, fs_cursor:fsCursor,
+                rescan_all:$('#henkan_bulk_rescan_all').is(':checked')?1:0,
+                bulk_only_unconverted:$('#henkan_bulk_only_unconverted').is(':checked')?1:0,
+                bulk_only_failed:$('#henkan_bulk_only_failed').is(':checked')?1:0
+            }, function(res) {
+                if(!res.success){ alert(res.data.msg || henkan_ajax.i18n.error); btn.prop('disabled',false); return; }
+                todoList=todoList.concat(res.data.items||[]); scannedTotal += res.data.total_scanned||0;
+                scanAfter=res.data.after_id||scanAfter; scanPhase=res.data.phase||'ids'; fsCursor=res.data.fs_cursor||0; $('#henkan_total_found').text(scannedTotal); $('#henkan_to_convert').text(todoList.length); $('#henkan_scan_results').show();
+                if(res.data.has_more){ $('#henkan_status_text').text('Scanne…'); scanPage(); return; }
+                totalTodo=todoList.length; saveState(todoList,totalTodo); btn.text(henkan_ajax.i18n.starting).hide();
+                if(totalTodo===0) $('#henkan_status_text').text(henkan_ajax.i18n.done);
+            }).fail(function(){ alert('Server Error'); btn.prop('disabled',false); });
+        }
+        scanPage();
     });
 
+    function pollQueue() {
+        $.post(henkan_ajax.ajax_url, {action:'henkan_queue_status',nonce:henkan_ajax.nonce_scan}, function(res){
+            if(!res.success) return; const q=res.data.state||{};
+            $('#henkan_status_text').text(q.active ? ('Background Queue: '+(q.processed||0)+' verarbeitet') : 'Background Queue fertig.');
+            if(q.active) setTimeout(pollQueue,3000); else $('.fill').css('width','100%');
+        });
+    }
+
     $('#henkan_start_convert').click(function() {
+        // Restore the saved queue if the page was reloaded after a scan
+        if(todoList.length === 0){ const st = loadState(); if(st){ todoList = st.todo; totalTodo = st.total || st.todo.length; } }
         $(this).hide();
+        $('#henkan_progress_ui').show();
+        processNextBatch();
+    });
+
+    $('#henkan_resume_convert').click(function() {
+        const st = loadState();
+        if(!st || st.todo.length === 0){ clearState(); return; }
+        todoList = st.todo; totalTodo = st.total || st.todo.length;
+        $(this).hide(); $('#henkan_start_convert').hide(); $('#henkan_start_scan').hide();
         $('#henkan_progress_ui').show();
         processNextBatch();
     });
@@ -108,17 +137,18 @@ jQuery(document).ready(function($) {
             clearState();
             $('#henkan_status_text').text(henkan_ajax.i18n.done);
             $('.fill').css('width', '100%');
-            $('#henkan_log_list').prepend('<li><strong>' + henkan_ajax.i18n.all_done + '</strong></li>');
+            logLine(henkan_ajax.i18n.all_done, '', true);
             
-            $.post(henkan_ajax.ajax_url, { action: 'henkan_clear_cache' }, function(res) {
+            $.post(henkan_ajax.ajax_url, { action: 'henkan_clear_cache', nonce: henkan_ajax.nonce_scan }, function(res) {
                  if(res.success && res.data.msg) {
-                     $('#henkan_log_list').prepend('<li style="color:#46b450"><strong>' + res.data.msg + '</strong></li>');
+                     logLine(res.data.msg, '#46b450', true);
                  }
             });
             return;
         }
 
-        let chunk = todoList.splice(0, 1); 
+        let chunk = todoList.splice(0, 1);
+        saveState(todoList, totalTodo); // persist progress so Resume works after a reload 
         let done = totalTodo - todoList.length;
         let pct = (done / totalTodo) * 100;
         
@@ -131,13 +161,13 @@ jQuery(document).ready(function($) {
             item: chunk[0]
         }, function(res) {
             if(res.success) {
-                $('#henkan_log_list').prepend('<li>' + res.data.msg + '</li>');
+                logLine(res.data.msg);
             } else {
-                $('#henkan_log_list').prepend('<li style="color:red">Error: ' + res.data.msg + '</li>');
+                logLine('Error: ' + ((res.data && res.data.msg) || ''), 'red');
             }
             processNextBatch();
         }).fail(function() {
-            $('#henkan_log_list').prepend('<li style="color:red">Server Error</li>');
+            logLine('Server Error', 'red');
             processNextBatch();
         });
     }

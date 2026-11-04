@@ -1,9 +1,9 @@
 === Henkan - WebP & AVIF Converter ===
 Contributors: Saguya
 Tags: webp, avif, image optimization, pagespeed, converter
-Requires at least: 6.9
-Tested up to: 7.0
-Stable tag: 2.3.2
+Requires at least: 7.0
+Tested up to: 7.1
+Stable tag: 2.4.2
 Requires PHP: 8.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -34,7 +34,7 @@ Most image optimizers rely on slow PHP processing or expensive cloud APIs with m
 ### 🛠️ System Requirements
 
 To unleash the full speed of Henkan, we recommend:
-* **WordPress:** 6.9 or higher
+* **WordPress:** 7.0 or higher
 * **PHP:** 8.4 or higher
 * **For WebP:** `cwebp` installed on the server (recommended) OR PHP `GD` extension with WebP support.
 * **For AVIF:** `avifenc` or `ImageMagick` (magick/convert) installed OR PHP `GD` extension with AVIF support.
@@ -69,6 +69,94 @@ For large media libraries, using the terminal is highly recommended.
 3. Seamless integration into the WordPress Media Library.
 
 == Changelog ==
+
+= 2.4.2 =
+### Fixes
+* **Broken thumbnails with "Keep original" off:** Bulk conversion (media library, WP-CLI, background queue) deleted the JPEG/PNG sizes but left them in the attachment metadata, so WordPress linked deleted files (404). The metadata now points to the converted files. Sites already affected are repaired automatically in the background after the update (or with `wp henkan repair`).
+* **`<picture>` for all image sizes:** Images inserted in a size other than "full" (WordPress inserts "large" by default) were not wrapped. The `<source>` now also carries the full responsive `srcset` and `sizes` of the image instead of a single file, so mobile devices no longer load the largest image. Existing `<picture>` elements are left alone and single-quoted attributes are supported.
+* **Settings:** Backslashes in exclusions and folder paths were removed on save (regex `/\.min\./` became `/.min./`).
+* **WP-CLI:** `wp henkan scan` reported at most one image.
+* **Large upload folders:** The folder scan now runs in time-boxed steps instead of one request, so it no longer hits PHP timeouts.
+* Files listed by the folder scan that were already converted via their media-library entry are no longer reported as "Not found".
+* Converter binaries are checked once per request instead of once per image.
+* Invalid AVIF converter values fall back to GD, the same default as on a fresh install.
+
+### Security / Hardening
+* Custom scan folders must be inside the WordPress installation, `wp-content` or the uploads folder (filter `henkan_allow_custom_root` for other layouts). Ignored folders are shown on the settings page.
+* JPEG XL uploads are only allowed when JXL is enabled in Henkan.
+* Deleting an attachment only removes plain file names from the Henkan data (no paths).
+* New `uninstall.php` removes the Henkan table, options, post meta and cron events. Converted images are kept on purpose.
+
+### Code Quality (Plugin Check)
+* `unlink()` replaced with `wp_delete_file()`.
+* Table names in SQL queries are passed with the `%i` identifier placeholder of `$wpdb->prepare()`, including the one-time post meta migration.
+* Necessary direct queries on the plugin's own table and the attachment paging are documented with `phpcs:ignore` comments.
+* Consistent CRLF line endings in all PHP files; prefixed global variable in `uninstall.php`.
+
+= 2.4.1 =
+### Security
+* **XSS fix:** Bulk log messages are now returned as plain text and rendered with `.text()`, so file names can no longer inject HTML/JS into the admin screen.
+* **File type validation:** AVIF/JXL uploads are verified by their file signature instead of trusting the extension.
+* **Path allowlist:** Single-file conversion requests are restricted to the configured scan folders. On multisite only super admins can change custom scan paths.
+* **Safe temp files:** Resize temp files now use unguessable names (`wp_tempnam`).
+* **Decompression bomb protection:** Images are validated (MIME type and pixel count, filter `henkan_max_pixels`) before any decoding, including the resize step.
+* **CSRF:** The cache-clear AJAX action now requires a nonce.
+* **Object injection:** Stored conversion data is unserialized with `allowed_classes => false`.
+* **Frontend:** `<picture>` sources are escaped with `esc_url()`, only emitted for JPEG/PNG uploads, and only when the converted file exists.
+* **Dashboard widget:** Only visible to users with `manage_options`.
+
+### Fixes
+* Smart Options are no longer reset when saving the General, Folders or Advanced tabs.
+* The folder scan runs once per bulk scan instead of on every attachment page (no more duplicates).
+* The "Resume" button now works and progress is persisted.
+* Stale background worker locks are recovered after 15 minutes.
+* Cron events are removed on deactivation and scheduled on first settings save.
+* Fixed `|` instead of `||` in the WP-CLI guard.
+* Aligned the "Requires at least" version (WordPress 7.0) across plugin header, readme and requirements.
+
+= 2.4.0 =
+### Security
+* **Enhanced image MIME validation:** Added strict server-side image type verification using `mime_content_type()` with `exif_imagetype()` fallback.
+* **Fail-closed image processing:** Files are rejected when no reliable image type verification method is available.
+* **Conversion locking:** Added atomic per-attachment conversion locks to prevent concurrent conversion of the same image and generated sizes.
+* **Stale lock recovery:** Conversion locks that remain active after an unexpected process termination can be safely recovered.
+* **Lock ownership validation:** Processes can only release locks that they own.
+* **Integrity check locking:** Prevented multiple integrity checks from running concurrently.
+
+### Bulk Optimization
+* **Cursor-based media scanning:** Replaced unbounded media-library queries with bounded cursor/keyset pagination.
+* **Reduced memory usage:** Large media libraries are no longer loaded into PHP memory in a single request.
+* **Improved AJAX bulk processing:** Bulk scans now process images in controlled batches and return a continuation cursor.
+* **Improved "Only missing" detection:** Conversion status is now verified against the actual files on disk instead of relying solely on database records.
+* **Multi-format verification:** Missing WebP, AVIF, or JPEG XL files are detected independently when multiple output formats are enabled.
+
+### Background Processing
+* **Real background queue worker:** Added a bounded WP-Cron worker for background bulk optimization.
+* **Queue locking:** Prevented multiple background workers from processing the same queue simultaneously.
+* **Cursor-based queue:** The background queue stores a lightweight attachment cursor instead of maintaining a potentially massive list of attachment IDs.
+* **Bounded worker execution:** Each worker run processes a limited number of attachments to reduce PHP execution time and memory pressure.
+* **Automatic queue continuation:** Remaining work is automatically scheduled for subsequent WP-Cron runs.
+* **Safe queue completion:** Queue state is persisted and finalized cleanly after the last batch.
+* **Automatic cache cleanup:** Relevant caches are cleared after successful queue completion when enabled.
+
+### WP-CLI
+* **Keyset pagination:** Replaced offset-based pagination with ID-based cursor pagination.
+* **Improved large-library performance:** WP-CLI bulk processing no longer becomes progressively slower as the attachment offset increases.
+* **Bounded processing:** CLI operations now use controlled batch sizes.
+
+### Database & Integrity
+* **Chunked integrity checks:** Henkan data is now checked in bounded batches instead of loading the complete `wp_henkan_data` table into memory.
+* **Reduced database memory pressure:** Large Henkan installations can perform integrity checks without creating oversized PHP result sets.
+* **Improved missing-file detection:** Integrity checks can identify missing converted files more reliably.
+
+### Web Server Delivery
+* **Deterministic format priority:** Updated generated Nginx configuration to use the documented format priority:
+  `WebP > AVIF > JPEG XL`.
+* **Improved multi-format handling:** Format availability is evaluated independently rather than treating the presence of one generated format as sufficient.
+
+= 2.3.3 =
+* **Security:** Added strict server-side MIME-type verification (using `mime_content_type` and `exif_imagetype`) to the image creation process. This prevents malicious file uploads disguised as images from reaching the CLI fallback converters, effectively mitigating the CVE-2026-65640 vulnerability (Imagick/Ghostscript RCE).
+* **Changed:** Bumped the "Requires at least" WordPress version to 7.0.4 to align with core security standards and ensure safe environment execution.
 
 = 2.3.2 =
 * **Fix Readme

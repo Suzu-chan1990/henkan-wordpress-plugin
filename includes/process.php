@@ -42,7 +42,7 @@ function henkan_handle_upload( $metadata, $attachment_id ) {
     if ( ! $file || ! file_exists( $file ) ) return $metadata;
 
     $path_info = pathinfo( $file );
-    $ext = strtolower( $path_info['extension'] );
+    $ext = strtolower( $path_info['extension'] ?? '' );
     if ( ! in_array( $ext, [ 'jpg', 'jpeg', 'png' ], true ) ) return $metadata;
 
     if ( function_exists('henkan_is_file_excluded') && henkan_is_file_excluded( $file ) ) return $metadata;
@@ -74,6 +74,8 @@ function henkan_handle_upload( $metadata, $attachment_id ) {
             if ( $rel_path && $primary_fmt !== '' ) {
                 $new_rel_path = preg_replace( '/\.(jpg|jpeg|png)$/i', '.' . $primary_fmt, $rel_path );
                 update_post_meta( $attachment_id, '_wp_attached_file', $new_rel_path );
+                // Keep the attachment metadata in sync with the new main file
+                if ( ! empty( $metadata['file'] ) ) $metadata['file'] = $new_rel_path;
             }
             if ( $primary_fmt !== '' ) {
                 wp_update_post( [ 'ID' => $attachment_id, 'post_mime_type' => henkan_target_mime( $primary_fmt ) ] );
@@ -130,10 +132,54 @@ function henkan_handle_upload( $metadata, $attachment_id ) {
     return $metadata;
 }
 
+// Validate a source image before any decoding: real MIME type + pixel limit.
+// Returns '' if the file is acceptable, otherwise an error string.
+function henkan_validate_source( $source ) {
+    if ( function_exists( 'mime_content_type' ) ) {
+        $real_mime = @mime_content_type( $source );
+        if ( ! in_array( $real_mime, [ 'image/jpeg', 'image/png' ], true ) ) {
+            return 'Security Reject: Invalid actual mime-type (' . sanitize_text_field( (string) $real_mime ) . ')';
+        }
+    } elseif ( function_exists( 'exif_imagetype' ) ) {
+        $type = @exif_imagetype( $source );
+        if ( $type !== IMAGETYPE_JPEG && $type !== IMAGETYPE_PNG ) {
+            return 'Security Reject: Invalid exif_imagetype';
+        }
+    } else {
+        return 'Security Reject: No server-side image type verifier available';
+    }
+
+    // Reject decompression bombs: small files that expand to gigabytes of pixels
+    $dim = @getimagesize( $source );
+    $max_pixels = (int) apply_filters( 'henkan_max_pixels', 50000000 );
+    if ( ! $dim || empty( $dim[0] ) || empty( $dim[1] ) || ( (int) $dim[0] * (int) $dim[1] ) > $max_pixels ) {
+        return 'Security Reject: Image dimensions invalid or too large';
+    }
+    return '';
+}
+
+// Checks once per request whether a command line converter is installed (instead of per image)
+function henkan_binary_available( $bin, $version_arg = '--version' ) {
+    static $cache = [];
+    if ( isset( $cache[ $bin ] ) ) return $cache[ $bin ];
+    if ( ! function_exists( 'exec' ) || ! is_callable( 'exec' ) ) return $cache[ $bin ] = false;
+    $out = [];
+    $rv  = 1;
+    @exec( $bin . ' ' . $version_arg . ' 2>&1', $out, $rv );
+    return $cache[ $bin ] = ( $rv === 0 );
+}
+
 // ROBUST GENERATION: TRIES ALL CONVERTERS IF ONE FAILS
 function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = null ) {
     $GLOBALS['henkan_last_error'] = '';
     if ( file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
+
+    // Strict source validation (MIME type + pixel limit)
+    $invalid = henkan_validate_source( $source );
+    if ( $invalid !== '' ) {
+        $GLOBALS['henkan_last_error'] = $invalid;
+        return false;
+    }
 
     $target_ext = strtolower( pathinfo( $dest, PATHINFO_EXTENSION ) );
     $src_ext = strtolower( (string) $src_ext );
@@ -149,8 +195,7 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
         foreach ( $methods as $method ) {
             if ( $method === 'cwebp' ) {
                 if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                    @exec( 'cwebp -version', $o, $rv );
-                    if ( $rv === 0 ) {
+                    if ( henkan_binary_available( 'cwebp', '-version' ) ) {
                         $cmd = sprintf( 'cwebp -q %d -m 2 %s -o %s -quiet', $quality, escapeshellarg( $source ), escapeshellarg( $dest ) );
                         @exec( $cmd, $out, $ret );
                         if ( $ret === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
@@ -189,8 +234,7 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
         foreach ( $methods as $method ) {
             if ( $method === 'avifenc' ) {
                 if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                    @exec( 'avifenc --version', $o, $rv );
-                    if ( $rv === 0 ) {
+                    if ( henkan_binary_available( 'avifenc' ) ) {
                         $q = max( 0, min( 63, (int) round( ( 100 - $quality ) / 100 * 63 ) ) );
                         $cmd = sprintf( 'avifenc -q %d %s %s', $q, escapeshellarg( $source ), escapeshellarg( $dest ) );
                         @exec( $cmd, $out, $ret );
@@ -200,8 +244,7 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
                 } else $errors[] = 'exec disabled';
             } elseif ( $method === 'imagick' ) {
                 if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                    @exec( 'magick -version', $o2, $rv2 );
-                    if ( $rv2 === 0 ) {
+                    if ( henkan_binary_available( 'magick', '-version' ) ) {
                         $cmd = sprintf( 'magick %s -quality %d %s', escapeshellarg( $source ), $quality, escapeshellarg( $dest ) );
                         @exec( $cmd, $out2, $ret2 );
                         if ( $ret2 === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
@@ -240,8 +283,7 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
         foreach ( $methods as $method ) {
             if ( $method === 'cjxl' ) {
                 if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                    @exec( 'cjxl --version', $o, $rv );
-                    if ( $rv === 0 ) {
+                    if ( henkan_binary_available( 'cjxl' ) ) {
                         $cmd = sprintf( 'cjxl %s %s -q %d', escapeshellarg( $source ), escapeshellarg( $dest ), $quality );
                         @exec( $cmd, $out, $ret );
                         if ( $ret === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
@@ -250,8 +292,7 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
                 } else $errors[] = 'exec disabled';
             } elseif ( $method === 'imagick' ) {
                 if ( function_exists( 'exec' ) && is_callable( 'exec' ) ) {
-                    @exec( 'magick -version', $o2, $rv2 );
-                    if ( $rv2 === 0 ) {
+                    if ( henkan_binary_available( 'magick', '-version' ) ) {
                         $cmd = sprintf( 'magick %s -quality %d %s', escapeshellarg( $source ), $quality, escapeshellarg( $dest ) );
                         @exec( $cmd, $out2, $ret2 );
                         if ( $ret2 === 0 && file_exists( $dest ) && filesize( $dest ) > 0 ) return true;
@@ -281,6 +322,8 @@ function henkan_create_image( $source, $dest, $quality, $src_ext, $settings = nu
  */
 function henkan_maybe_resize_for_conversion( $source, $max_width, $src_ext ) {
     if ( $max_width <= 0 ) return $source;
+    // Validate before decoding; create_image() will report the rejection
+    if ( henkan_validate_source( $source ) !== '' ) return $source;
 
     $img = null;
     if ( in_array( $src_ext, [ 'jpg', 'jpeg' ], true ) && function_exists( 'imagecreatefromjpeg' ) ) {
@@ -302,7 +345,11 @@ function henkan_maybe_resize_for_conversion( $source, $max_width, $src_ext ) {
     $new_h = (int) round( $orig_h * ( $max_width / $orig_w ) );
 
     // Temporäre Datei anlegen
-    $tmp = sys_get_temp_dir() . '/henkan_resize_' . md5( $source ) . '.' . $src_ext;
+    // Unguessable temp file name (avoids symlink attacks in shared temp dirs)
+    if ( ! function_exists( 'wp_tempnam' ) ) require_once ABSPATH . 'wp-admin/includes/file.php';
+    $tmp_base = wp_tempnam( 'henkan_resize' );
+    $tmp = $tmp_base . '.' . $src_ext;
+    wp_delete_file( $tmp_base );
 
     $resized = imagecreatetruecolor( $new_w, $new_h );
     if ( ! $resized ) return $source;
@@ -336,13 +383,38 @@ function henkan_maybe_resize_for_conversion( $source, $max_width, $src_ext ) {
     return file_exists( $tmp ) ? $tmp : $source;
 }
 
+function henkan_lock_key( $path, $id, $size_name ) {
+    return 'henkan_lock_' . md5( wp_normalize_path( $path ) . '|' . (int) $id . '|' . (string) $size_name );
+}
+
+function henkan_acquire_lock( $path, $id, $size_name, $ttl = 1800 ) {
+    $key = henkan_lock_key( $path, $id, $size_name );
+    $token = wp_generate_uuid4();
+    $now = time();
+    $existing = get_option( $key, false );
+    if ( is_array( $existing ) && ! empty( $existing['started'] ) && ( $now - (int) $existing['started'] ) < $ttl ) return false;
+    if ( $existing !== false ) delete_option( $key );
+    if ( ! add_option( $key, [ 'token' => $token, 'started' => $now ], '', false ) ) return false;
+    return $token;
+}
+
+function henkan_release_lock( $path, $id, $size_name, $token ) {
+    if ( ! $token ) return;
+    $key = henkan_lock_key( $path, $id, $size_name );
+    $current = get_option( $key, false );
+    if ( is_array( $current ) && isset( $current['token'] ) && hash_equals( (string) $current['token'], (string) $token ) ) delete_option( $key );
+}
 function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
+    $lock_token = henkan_acquire_lock( $path, $id, $size_name );
+    if ( ! $lock_token ) return ['success' => false, 'generated' => [], 'failed' => ['locked']];
+
+    try {
     $settings = henkan_get_settings();
     $fmts = henkan_target_formats( $settings );
     if ( empty( $fmts ) ) return ['success' => false, 'generated' => [], 'failed' => []];
 
     $info = pathinfo( $path );
-    $src_ext = strtolower( $info['extension'] );
+    $src_ext = strtolower( $info['extension'] ?? '' );
     if ( ! in_array( $src_ext, [ 'jpg', 'jpeg', 'png' ], true ) ) return ['success' => false, 'generated' => [], 'failed' => []];
 
     if ( function_exists('henkan_is_file_excluded') && henkan_is_file_excluded( $path ) ) return ['success' => false, 'generated' => [], 'failed' => ['excluded']];
@@ -405,6 +477,11 @@ function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
                 if ( $rel && $primary_fmt !== '' ) {
                     $new = preg_replace( '/\.(jpg|jpeg|png)$/i', '.' . $primary_fmt, $rel );
                     update_post_meta( $id, '_wp_attached_file', $new );
+                    $att_meta = wp_get_attachment_metadata( $id );
+                    if ( is_array( $att_meta ) && ! empty( $att_meta['file'] ) ) {
+                        $att_meta['file'] = $new;
+                        wp_update_attachment_metadata( $id, $att_meta );
+                    }
                 }
                 if ( $primary_fmt !== '' ) {
                     wp_update_post( [ 'ID' => $id, 'post_mime_type' => henkan_target_mime( $primary_fmt ) ] );
@@ -418,16 +495,30 @@ function henkan_convert_file( $path, $id, $size_name, $update_db = true ) {
         if ( $any_success ) {
             henkan_update_data( $id, $meta );
             if ( empty( $settings['keep_original'] ) ) {
+                // Point the size in the attachment metadata to the new file BEFORE the JPEG/PNG
+                // is deleted, otherwise WordPress keeps linking the deleted thumbnail (404).
+                if ( $size_name !== 'original' && $size_name !== 'custom' ) {
+                    $primary_fmt = henkan_get_primary_format( $generated );
+                    $att_meta    = wp_get_attachment_metadata( $id );
+                    if ( $primary_fmt !== '' && is_array( $att_meta ) && isset( $att_meta['sizes'][ $size_name ] ) ) {
+                        $att_meta['sizes'][ $size_name ]['file']      = $info['filename'] . '.' . $primary_fmt;
+                        $att_meta['sizes'][ $size_name ]['mime-type'] = henkan_target_mime( $primary_fmt );
+                        wp_update_attachment_metadata( $id, $att_meta );
+                    }
+                }
                 wp_delete_file( $path );
             }
         }
     }
     // Temporäre resize-Datei aufräumen, falls eine erstellt wurde
     if ( $actual_source !== $path && file_exists( $actual_source ) ) {
-        @unlink( $actual_source );
+        wp_delete_file( $actual_source );
     }
 
     return ['success' => $any_success, 'generated' => $generated, 'failed' => $failed];
+    } finally {
+        henkan_release_lock( $path, $id, $size_name, $lock_token );
+    }
 }
 
 add_action( 'delete_post', function( $pid ) {
@@ -438,14 +529,18 @@ add_action( 'delete_post', function( $pid ) {
             $base = dirname( $file );
             foreach ( $meta as $files ) {
                 if ( is_array( $files ) ) {
-                    if ( isset( $files['webp'] ) ) wp_delete_file( $base . '/' . $files['webp'] );
-                    if ( isset( $files['avif'] ) ) wp_delete_file( $base . '/' . $files['avif'] );
-                    if ( isset( $files['jxl'] ) ) wp_delete_file( $base . '/' . $files['jxl'] );
+                    // basename(): stored names are plain file names; never follow a path from the DB
+                    foreach ( [ 'webp', 'avif', 'jxl' ] as $fmt ) {
+                        if ( isset( $files[ $fmt ] ) && is_string( $files[ $fmt ] ) && $files[ $fmt ] !== '' ) {
+                            wp_delete_file( $base . '/' . basename( $files[ $fmt ] ) );
+                        }
+                    }
                 }
             }
         }
     }
     global $wpdb;
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- plugin's own table, no core API
     $wpdb->delete( $wpdb->prefix . 'henkan_data', ['attachment_id' => $pid] );
 });
 
@@ -455,4 +550,72 @@ function henkan_trigger_cache_clear() {
     if ( function_exists( 'wp_cache_clear_cache' ) ) wp_cache_clear_cache();
     if ( class_exists( 'autoptimizeCache' ) ) autoptimizeCache::clearall();
     if ( class_exists( 'LiteSpeed_Cache_API' ) ) LiteSpeed_Cache_API::purge_all();
+}
+
+/**
+ * Repairs attachment metadata of images converted by older versions with "Keep original" off:
+ * the bulk converter deleted the JPEG/PNG sizes but left them in the metadata (broken thumbnails).
+ * Only sizes whose file is missing AND whose converted file exists are changed.
+ *
+ * @return bool True if the metadata was changed.
+ */
+function henkan_repair_attachment_metadata( $id ) {
+    $file = get_attached_file( $id );
+    $meta = wp_get_attachment_metadata( $id );
+    if ( ! $file || ! is_array( $meta ) ) return false;
+    $dir     = dirname( $file );
+    $changed = false;
+
+    // Main file entry
+    $rel = get_post_meta( $id, '_wp_attached_file', true );
+    if ( $rel && ! empty( $meta['file'] ) && $meta['file'] !== $rel && file_exists( $file ) && ! file_exists( $dir . '/' . basename( $meta['file'] ) ) ) {
+        $meta['file'] = $rel;
+        $changed = true;
+    }
+
+    // Sizes
+    if ( ! empty( $meta['sizes'] ) && is_array( $meta['sizes'] ) ) {
+        foreach ( $meta['sizes'] as $size => $data ) {
+            if ( empty( $data['file'] ) || ! preg_match( '/\.(jpe?g|png)$/i', $data['file'] ) ) continue;
+            if ( file_exists( $dir . '/' . $data['file'] ) ) continue;
+            $stem = pathinfo( $data['file'], PATHINFO_FILENAME );
+            foreach ( [ 'webp', 'avif', 'jxl' ] as $fmt ) { // same priority as henkan_get_primary_format()
+                if ( file_exists( $dir . '/' . $stem . '.' . $fmt ) ) {
+                    $meta['sizes'][ $size ]['file']      = $stem . '.' . $fmt;
+                    $meta['sizes'][ $size ]['mime-type'] = henkan_target_mime( $fmt );
+                    $changed = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if ( $changed ) wp_update_attachment_metadata( $id, $meta );
+    return $changed;
+}
+
+/**
+ * Background repair run (WP-Cron), once after updating to 2.4.2. Walks converted attachments
+ * (WebP/AVIF/JXL main file) in small chunks.
+ */
+add_action( 'henkan_repair_metadata_event', 'henkan_repair_metadata_batch' );
+function henkan_repair_metadata_batch() {
+    global $wpdb;
+    $state = get_option( 'henkan_metadata_repair', [ 'last_id' => 0, 'fixed' => 0 ] );
+    if ( ! empty( $state['done'] ) ) return;
+    // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- keyset paging over attachments by MIME type, one-time background job
+    $ids = $wpdb->get_col( $wpdb->prepare(
+        "SELECT ID FROM {$wpdb->posts} WHERE ID > %d AND post_type = 'attachment' AND post_mime_type IN ('image/webp','image/avif','image/jxl') ORDER BY ID ASC LIMIT 200",
+        (int) $state['last_id']
+    ) );
+    foreach ( $ids as $id ) {
+        if ( henkan_repair_attachment_metadata( (int) $id ) ) $state['fixed']++;
+        $state['last_id'] = (int) $id;
+    }
+    if ( count( $ids ) === 200 ) {
+        wp_schedule_single_event( time() + 10, 'henkan_repair_metadata_event' );
+    } else {
+        $state['done'] = time();
+    }
+    update_option( 'henkan_metadata_repair', $state, false );
 }

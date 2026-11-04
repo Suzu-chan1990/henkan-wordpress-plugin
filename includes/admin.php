@@ -56,6 +56,7 @@ function henkan_media_custom_column_content( $column_name, $id ) {
 
 add_action( 'wp_dashboard_setup', 'henkan_add_dashboard_widgets' );
 function henkan_add_dashboard_widgets() {
+    if ( ! current_user_can( 'manage_options' ) ) return;
     wp_add_dashboard_widget( 'henkan_dashboard_widget', __( 'Henkan Status', 'henkan-webp-avif-converter' ), 'henkan_dashboard_widget_content' );
 }
 
@@ -101,19 +102,33 @@ function henkan_sanitize_settings( $input ) {
     $quality = isset( $input['quality'] ) ? absint( $input['quality'] ) : $defaults['quality'];
     $clean['quality'] = max( 1, min( 100, $quality ) );
     $clean['batch_size'] = isset( $input['batch_size'] ) ? absint( $input['batch_size'] ) : $defaults['batch_size'];
-    $clean['custom_folders'] = isset( $input['custom_folders'] ) ? sanitize_textarea_field( wp_unslash( $input['custom_folders'] ) ) : '';
-    $clean['exclusions']     = isset( $input['exclusions'] ) ? sanitize_textarea_field( wp_unslash( $input['exclusions'] ) ) : '';
+    // options.php already unslashed the input once; a second wp_unslash() removed backslashes
+    // from regex exclusions (/\.min\./ became /.min./) and Windows paths.
+    $clean['custom_folders'] = isset( $input['custom_folders'] ) ? sanitize_textarea_field( $input['custom_folders'] ) : '';
+    $clean['exclusions']     = isset( $input['exclusions'] ) ? sanitize_textarea_field( $input['exclusions'] ) : '';
 
     // Smart Options – numerische Werte
     $clean['smart_quality_thumb'] = isset( $input['smart_quality_thumb'] ) ? max( 1, min( 100, absint( $input['smart_quality_thumb'] ) ) ) : 70;
     $clean['max_width_px']        = isset( $input['max_width_px'] ) ? max( 100, min( 10000, absint( $input['max_width_px'] ) ) ) : 2000;
+
+    // Preserve Smart Options when saving a tab that does not render them
+    $old = henkan_get_settings();
+    if ( empty( $input['_smart_tab'] ) ) {
+        foreach ( [ 'smart_quality_enabled', 'smart_quality_thumb', 'integrity_check_enabled', 'max_width_enabled', 'max_width_px' ] as $k ) {
+            $clean[ $k ] = $old[ $k ];
+        }
+    }
+    // On multisite only super admins may change scan paths
+    if ( is_multisite() && ! is_super_admin() ) {
+        $clean['custom_folders'] = $old['custom_folders'];
+    }
 
     $webp_allowed = [ 'cwebp', 'gd' ];
     $avif_allowed = [ 'avifenc', 'imagick', 'gd' ];
     $jxl_allowed  = [ 'cjxl', 'imagick' ];
 
     $clean['webp_converter'] = ( isset( $input['webp_converter'] ) && in_array( $input['webp_converter'], $webp_allowed, true ) ) ? $input['webp_converter'] : 'cwebp';
-    $clean['avif_converter'] = ( isset( $input['avif_converter'] ) && in_array( $input['avif_converter'], $avif_allowed, true ) ) ? $input['avif_converter'] : 'avifenc';
+    $clean['avif_converter'] = ( isset( $input['avif_converter'] ) && in_array( $input['avif_converter'], $avif_allowed, true ) ) ? $input['avif_converter'] : 'gd'; // same default as henkan_default_settings()
     $clean['jxl_converter']  = ( isset( $input['jxl_converter'] ) && in_array( $input['jxl_converter'], $jxl_allowed, true ) ) ? $input['jxl_converter'] : 'cjxl';
 
     return $clean;
@@ -191,7 +206,7 @@ function henkan_admin_page() {
     ?>
     <div class="wrap henkan-wrap">
         <div class="henkan-header">
-            <div class="header-title"><h1><?php esc_html_e( 'Henkan', 'henkan-webp-avif-converter' ); ?> <span class="version">v2.3.2</span></h1></div>
+            <div class="header-title"><h1><?php esc_html_e( 'Henkan', 'henkan-webp-avif-converter' ); ?> <span class="version">v2.4.1</span></h1></div>
             <div class="header-branding"><span class="dashicons dashicons-format-image" style="font-size:40px; width:40px; height:40px; color:#ccc;"></span></div>
         </div>
         <div class="henkan-grid top-stats">
@@ -265,6 +280,20 @@ function henkan_admin_page() {
                                     <label class="henkan-check-box-card"><input type="checkbox" name="henkan_settings[scan_theme_dir]" value="1" <?php checked( 1, $s['scan_theme_dir'] ); ?>><div><strong><?php esc_html_e( 'Theme Directory', 'henkan-webp-avif-converter' ); ?></strong><code><?php echo esc_html( $theme_path ); ?></code></div></label>
                                     <label style="display:block; margin-top:10px; font-size:0.9em;"><?php esc_html_e( 'Additional Paths:', 'henkan-webp-avif-converter' ); ?></label>
                                     <textarea name="henkan_settings[custom_folders]" class="widefat code" rows="2" placeholder="/var/www/html/extra"><?php echo esc_textarea( $s['custom_folders'] ); ?></textarea>
+                                    <?php
+                                    // Show folders that are ignored (missing or outside the WordPress installation)
+                                    $henkan_allowed_roots = array_map( 'wp_normalize_path', henkan_custom_roots( $s ) );
+                                    foreach ( preg_split( '/\R/', (string) $s['custom_folders'] ) as $henkan_c ) {
+                                        $henkan_c = trim( $henkan_c );
+                                        if ( $henkan_c === '' ) continue;
+                                        $henkan_real = realpath( $henkan_c );
+                                        if ( $henkan_real && in_array( wp_normalize_path( $henkan_real ), $henkan_allowed_roots, true ) ) continue;
+                                        echo '<p style="margin:4px 0 0; color:#d63638; font-size:0.9em;">' . esc_html(
+                                            /* translators: %s: Folder path */
+                                            sprintf( __( 'Ignored: %s (not found or outside the WordPress installation)', 'henkan-webp-avif-converter' ), $henkan_c )
+                                        ) . '</p>';
+                                    }
+                                    ?>
                                 </div>
                                 <div style="margin-top: 20px;">
                                     <?php submit_button( __( 'Save', 'henkan-webp-avif-converter' ) ); ?>
@@ -375,6 +404,7 @@ location ~* ^.+\.(png|jpe?g)$ {
                                     'enable_lazy_loading', 'enable_bg_queue', 'auto_clear_cache',
                                     'scan_uploads_dir', 'scan_theme_dir', 'custom_folders', 'exclusions',
                                 ];
+                                echo '<input type="hidden" name="henkan_settings[_smart_tab]" value="1">';
                                 foreach ( $hidden_keys as $hk ) {
                                     $hv = isset( $s[ $hk ] ) ? $s[ $hk ] : '';
                                     echo '<input type="hidden" name="henkan_settings[' . esc_attr( $hk ) . ']" value="' . esc_attr( $hv ) . '">';
@@ -485,7 +515,7 @@ location ~* ^.+\.(png|jpe?g)$ {
                                     global $wpdb;
                                     $henkan_tbl = $wpdb->prefix . 'henkan_data';
                                     // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-                                    $total_converted = (int) $wpdb->get_var( "SELECT COUNT(*) FROM $henkan_tbl" );
+                                    $total_converted = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i', $henkan_tbl ) );
 
                                     $savings_bytes = (int) get_option( 'henkan_total_savings_bytes', 0 );
                                     $savings_mb    = $savings_bytes > 0 ? round( $savings_bytes / 1048576, 2 ) : 0;
