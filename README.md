@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="https://ps.w.org/henkan-webp-avif-converter/assets/banner-772x250.png" width="772" alt="Henkan – WebP, AVIF & JPEG XL converter for WordPress">
+</p>
+
 === Henkan - WebP & AVIF Converter ===
 Contributors: Saguya
 Tags: webp, avif, image optimization, pagespeed, converter
