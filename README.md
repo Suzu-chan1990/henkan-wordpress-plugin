@@ -62,11 +62,31 @@ For large media libraries, using the terminal is highly recommended.
 * Scan and convert all missing images: `wp henkan convert`
 * Force convert everything: `wp henkan convert --force`
 
-== Screenshots ==
+## 📸 Screenshots
 
-1. The beautiful, modern Henkan Dashboard showing your optimization stats.
-2. Bulk conversion in progress with a sleek progress circle.
-3. Seamless integration into the WordPress Media Library.
+**1. Henkan settings page with live stats, format toggles and the bulk optimization panel.**
+
+![Henkan settings page](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-1.png)
+
+**2. Bulk optimization in progress with progress bar and live log.**
+
+![Bulk optimization](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-2.png)
+
+**3. Henkan column in the Media Library with one-click optimization.**
+
+![Media Library integration](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-3.png)
+
+**4. Scan folders: uploads, theme and additional paths.**
+
+![Scan folders](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-4.png)
+
+**5. Smart Options: quality by image size, integrity check, max output width and statistics.**
+
+![Smart Options](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-5.png)
+
+**6. Ready-to-copy server rewrite rules for Apache/LiteSpeed and Nginx.**
+
+![Server rewrites](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-6.png)
 
 == Changelog ==
 
