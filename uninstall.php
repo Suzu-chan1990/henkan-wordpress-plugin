@@ -14,7 +14,7 @@ function henkan_uninstall_site() {
     foreach ( [
         'henkan_settings', 'henkan_db_version', 'henkan_db_reset_v211', 'henkan_background_queue',
         'henkan_background_worker_lock', 'henkan_integrity_lock', 'henkan_integrity_last_run',
-        'henkan_integrity_missing_count', 'henkan_metadata_repair',
+        'henkan_integrity_missing_count', 'henkan_metadata_repair', 'henkan_total_savings_bytes',
     ] as $opt ) {
         delete_option( $opt );
     }
@@ -23,6 +23,7 @@ function henkan_uninstall_site() {
 
     delete_post_meta_by_key( '_henkan_state' );
     delete_post_meta_by_key( 'henkan_last_error' );
+    delete_post_meta_by_key( '_henkan_skipped' );
 
     foreach ( [ 'henkan_integrity_check_event', 'henkan_background_worker_event', 'henkan_repair_metadata_event' ] as $hook ) {
         wp_clear_scheduled_hook( $hook );

@@ -1,13 +1,9 @@
-<p align="center">
-  <img src="https://ps.w.org/henkan-webp-avif-converter/assets/banner-772x250.png" width="772" alt="Henkan – WebP, AVIF & JPEG XL converter for WordPress">
-</p>
-
 === Henkan - WebP & AVIF Converter ===
 Contributors: Saguya
 Tags: webp, avif, image optimization, pagespeed, converter
 Requires at least: 7.1
 Tested up to: 7.2
-Stable tag: 2.5.1
+Stable tag: 2.6.1
 Requires PHP: 8.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -29,10 +25,13 @@ Most image optimizers rely on slow PHP processing or expensive cloud APIs with m
 * **Next-Gen Formats:** Instantly convert images to WebP and AVIF formats.
 * **Zero-Config Auto-Conversion:** New images are optimized silently in the background the moment you upload them.
 * **1-Click Bulk Optimization:** Got a massive existing media library? Process thousands of images with a single click in our beautiful, modern dashboard.
-* **Smart Fallbacks:** Uses ultra-fast `exec()` binaries when available, falling back to GD or ImageMagick seamlessly if needed.
+* **Smart Fallbacks:** Uses fast command line converters (`cwebp`, `avifenc`, `cjxl`, ImageMagick) started without a shell and with a timeout, falling back to GD or the Imagick PHP extension if needed.
+* **Size Check:** Converted files that are not smaller than the original are dropped automatically.
+* **Undo:** Revert single images, a selection or everything – originals are never touched.
+* **Site Health:** Shows which converter works for each format and whether browsers really receive the optimized images.
 * **Cache Auto-Clear:** Fully compatible with WP Rocket, W3 Total Cache, Autoptimize, and LiteSpeed Cache. Conversions automatically trigger a cache purge.
-* **Frontend Delivery:** Automatically serves the optimized images to compatible browsers using modern HTML `<picture>` tags or Nginx/Apache rewrites.
-* **WP-CLI Power:** Built-in commands (`wp henkan convert`) for sysadmins to process massive libraries directly from the terminal without PHP timeouts.
+* **Frontend Delivery:** Automatically serves the optimized images to compatible browsers using modern HTML `<picture>` tags (post content and featured images) or Nginx/Apache rewrites.
+* **WP-CLI Power:** Built-in commands (`wp henkan convert`, `revert`, `stats`, `repair`) for sysadmins to process massive libraries directly from the terminal without PHP timeouts.
 * **Global Ready:** 100% translation-ready. Shipped with English, German (`de_DE`), and Japanese (`ja`) out of the box.
 
 ### 🛠️ System Requirements
@@ -41,7 +40,8 @@ To unleash the full speed of Henkan, we recommend:
 * **WordPress:** 7.1 or higher
 * **PHP:** 8.4 or higher
 * **For WebP:** `cwebp` installed on the server (recommended) OR PHP `GD` extension with WebP support.
-* **For AVIF:** `avifenc` or `ImageMagick` (magick/convert) installed OR PHP `GD` extension with AVIF support.
+* **For AVIF:** `avifenc` (1.0 or newer) or `ImageMagick` (magick) installed OR PHP `GD` extension with AVIF support OR the PHP `Imagick` extension with AVIF support.
+* Command line converters need `proc_open()` (or `exec()`) to be enabled. Without them, GD or Imagick is used.
 
 == Installation ==
 
@@ -64,35 +64,75 @@ Absolutely not. Henkan processes everything locally on your own server. No cloud
 = How do I use the WP-CLI commands? =
 For large media libraries, using the terminal is highly recommended. 
 * Scan and convert all missing images: `wp henkan convert`
-* Force convert everything: `wp henkan convert --force`
+* Force convert everything: `wp henkan convert --force --limit=-1`
+* Only some images or one format: `wp henkan convert --ids=12,34 --format=avif`
+* Undo: `wp henkan revert --ids=12,34` or `wp henkan revert --all --yes`
+* Statistics: `wp henkan stats`
 
-## 📸 Screenshots
+= Can I undo the conversion? =
+Yes, as long as the original JPEG/PNG exists: use "Revert" in the media library (list view), the bulk action, "Revert all conversions" in the Advanced tab or `wp henkan revert`. If "Keep Originals" was off, the converted file is the only copy of the image and is never deleted.
 
-**1. Henkan settings page with live stats, format toggles and the bulk optimization panel.**
+= Why was an image not converted ("Original kept")? =
+The converted file was not smaller than the original (this happens with small or already heavily compressed images). Henkan then keeps serving the original. You can turn this check off in General > Encoder.
 
-![Henkan settings page](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-1.png)
+= Which hooks are available for developers? =
+Actions: `henkan_converted` ($id, $size_name, $file, $format, $source), `henkan_attachment_converted` ($id, $result), `henkan_reverted` ($id, $removed_files), `henkan_cache_cleared`.
+Filters: `henkan_quality` ($quality, $format, $size_name, $id, $source), `henkan_encoder_args` ($args, $method, $format, $source, $dest, $quality), `henkan_settings`, `henkan_picture_enabled`, `henkan_max_pixels`, `henkan_allow_custom_root`.
 
-**2. Bulk optimization in progress with progress bar and live log.**
+== Screenshots ==
 
-![Bulk optimization](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-2.png)
-
-**3. Henkan column in the Media Library with one-click optimization.**
-
-![Media Library integration](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-3.png)
-
-**4. Scan folders: uploads, theme and additional paths.**
-
-![Scan folders](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-4.png)
-
-**5. Smart Options: quality by image size, integrity check, max output width and statistics.**
-
-![Smart Options](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-5.png)
-
-**6. Ready-to-copy server rewrite rules for Apache/LiteSpeed and Nginx.**
-
-![Server rewrites](https://ps.w.org/henkan-webp-avif-converter/assets/screenshot-6.png)
+1. The beautiful, modern Henkan Dashboard showing your optimization stats.
+2. Bulk conversion in progress with a sleek progress circle.
+3. Seamless integration into the WordPress Media Library.
 
 == Changelog ==
+
+= 2.6.1 =
+* **WebP quality settings:** New "WebP effort" (cwebp `-m`, 0-6) and "sharp colored edges" (cwebp `-sharp_yuv`) in General > Encoder. Effort 6 gives better quality at the same file size; sharp_yuv keeps colored lines and text crisp. Both make the conversion slower. Defaults (effort 2, sharp_yuv off) keep the previous output.
+* **Bulk Optimizer:** With "Keep Originals" off, the folder scan also listed JPEGs of media-library images that the same run converted and deleted moments before. These ended with "Error: Path not allowed"; they are now reported as "already converted".
+
+= 2.6.0 =
+### Fixes
+* **AVIF quality:** avifenc 1.0+ reads `-q` as quality 0-100, but Henkan converted the quality to the old 0-63 quantizer scale first. Quality 82 became `-q 11`, so AVIF files made with avifenc were heavily over-compressed. The quality is now passed unchanged.
+* **Nginx rules:** The old rules looked for `image.jpg.webp`, but Henkan writes `image.webp`, so they never delivered a converted file. New rules with one `map` per format; a missing AVIF now falls back to WebP. Replace the old rules on your server.
+* **One delivery order everywhere:** `<picture>`, Apache and Nginx rules now all prefer AVIF > WebP > JPEG XL (the rules used JXL first, the changelog said WebP first).
+* **Lazy-Loading:** Henkan no longer adds `loading="lazy"` on top of WordPress core. It only adds it when core lazy-loading is turned off, and then skips the first images and `fetchpriority="high"` images, so the LCP image is never delayed.
+* **Featured images:** `<picture>` is now also used for featured images and every `wp_get_attachment_image()` output (themes, blocks, widgets). Can be turned off in Advanced. Feeds are left alone.
+* **Uploads:** New uploads now use the same pipeline as bulk conversion, so Max Output Width and Quality by Image Size also apply to uploads.
+* **Bulk "Force":** Re-encodes images that are already converted (before, existing files were kept and "Force" did nothing). Only images whose original JPEG/PNG still exists are re-encoded.
+* **Space saved:** The statistic in Smart Options was never updated. Henkan now counts the saved bytes per converted file; `wp henkan stats --recalculate` measures existing files.
+* **`wp henkan stats`:** The command was documented but missing; it is now available.
+* **LiteSpeed Cache:** Purges through the current `litespeed_purge_all` hook (the old API class only as fallback).
+* Failed converters no longer leave partial output files behind.
+
+### Converter Engine
+* **No shell:** Command line converters are started with `proc_open()` and an argument array instead of `exec()`. `exec()` is only used as a fallback when a host disables `proc_open()`.
+* **Timeout:** A hanging converter is killed after the "Converter timeout" (default 120 s) and the next converter is tried.
+* **Real error messages:** The converter's own error output is stored and shown in the log and the media library.
+* **Imagick extension:** New converter "Imagick (PHP extension)" for WebP, AVIF and JPEG XL, without starting a process. "ImageMagick (CLI)" is the former "ImageMagick (exec)" option.
+* **Size check:** If a converted file is not smaller than the original, it is dropped and the original is served (setting, on by default). These images get the status "Original kept" and are not scanned again.
+* **Encoder options:** Lossless WebP/JPEG XL for PNG, keep EXIF/XMP, AVIF speed (0-10), encoder threads.
+
+### Media Library
+* **Row actions:** "Henkan: Re-convert", "Re-convert with quality…" and "Revert" in the list view.
+* **Bulk actions:** "Henkan: Convert", "Henkan: Re-convert (force)" and "Henkan: Revert".
+* **Status column:** Shows the created formats, "Failed" with the error as tooltip, and "Original kept".
+
+### Revert
+* **Revert all** in Advanced deletes the WebP/AVIF/JXL files of all images whose original JPEG/PNG still exists. A converted file is only ever deleted when its original is next to it, so images converted with "Keep Originals" off are never touched.
+
+### Site Health
+* New tests "Henkan image converters" (which converter works per format) and "Henkan image delivery" (checks `<picture>` or makes a test request to see whether the server rewrite rules work).
+* New "Henkan" section in Site Health > Info with converters, binaries, GD/Imagick support and settings.
+
+### WP-CLI
+* `wp henkan convert`: new `--ids`, `--format`, `--quality` and `--dry-run`; `--limit=-1` for all; summary with converted / kept / failed.
+* `wp henkan revert --ids=… | --all [--yes] [--dry-run]`
+* `wp henkan stats [--recalculate]`
+
+### For Developers
+* Actions: `henkan_converted`, `henkan_attachment_converted`, `henkan_reverted`, `henkan_cache_cleared`.
+* Filters: `henkan_quality`, `henkan_encoder_args`, `henkan_settings`, `henkan_picture_enabled`.
 
 = 2.5.1 =
 ### Fixes

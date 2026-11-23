@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 2.5.1
+ * Version: 2.6.1
  * Author: Saguya
  * Text Domain: henkan-webp-avif-converter
  * Domain Path: /languages
@@ -16,7 +16,7 @@ defined( 'ABSPATH' ) || exit;
 
 define( 'HENKAN_PATH', plugin_dir_path( __FILE__ ) );
 define( 'HENKAN_URL', plugin_dir_url( __FILE__ ) );
-define( 'HENKAN_VERSION', '2.5.1' );
+define( 'HENKAN_VERSION', '2.6.1' );
 
 // ABSOLUTELY NO FORMAT IS ACTIVE BY DEFAULT
 function henkan_default_settings() {
@@ -46,6 +46,16 @@ function henkan_default_settings() {
         'integrity_check_enabled'  => 0,
         'max_width_enabled'        => 0,
         'max_width_px'             => 2000,
+        // Encoder options (2.6.0)
+        'skip_larger'              => 1,  // drop converted files that are not smaller than the original
+        'png_lossless'             => 0,  // lossless WebP/JXL for PNG sources
+        'keep_metadata'            => 0,  // keep EXIF/XMP in converted files
+        'avif_speed'               => 6,  // 0 (slowest, smallest) .. 10 (fastest)
+        'webp_method'              => 2,  // cwebp -m: 0 (fastest) .. 6 (best quality per byte)
+        'webp_sharp_yuv'           => 0,  // cwebp -sharp_yuv: sharper colored edges (lines, text)
+        'encoder_threads'          => 1,  // threads for cwebp/avifenc/cjxl
+        'exec_timeout'             => 120, // seconds before a hanging converter is killed
+        'picture_attachment_images' => 1, // also wrap featured images / wp_get_attachment_image()
     ];
 }
 
@@ -72,7 +82,12 @@ function henkan_is_file_excluded( $file_path ) {
 function henkan_get_settings() {
     $defaults = henkan_default_settings();
     $opt = get_option( 'henkan_settings', [] );
-    return wp_parse_args( $opt, $defaults );
+    /**
+     * Filters the effective Henkan settings (e.g. WP-CLI --format overrides).
+     *
+     * @param array $settings Settings merged with defaults.
+     */
+    return apply_filters( 'henkan_settings', wp_parse_args( $opt, $defaults ) );
 }
 
 function henkan_log( $msg ) {
@@ -184,8 +199,7 @@ function henkan_background_worker() {
             if(!$file || !file_exists($file) || henkan_is_file_excluded($file)){ $q['skipped']=(int)($q['skipped']??0)+1; continue; }
             if(!empty($q['only_failed']) && get_post_meta($id,'_henkan_state',true)!=='failed') continue;
             if(!empty($q['only_missing']) && empty($q['force']) && !henkan_attachment_needs_conversion($id,$settings)){ $q['skipped']=(int)($q['skipped']??0)+1; continue; }
-            $res=henkan_convert_file($file,$id,'original'); $meta=wp_get_attachment_metadata($id);
-            if(!empty($meta['sizes']) && is_array($meta['sizes'])){ $base=dirname($file); foreach($meta['sizes'] as $size=>$data){ if(!empty($data['file'])) henkan_convert_file($base.'/'.$data['file'],$id,$size); } }
+            $res=henkan_convert_attachment($id,['force'=>!empty($q['force'])]);
             $q['processed']=(int)($q['processed']??0)+1; $q['heartbeat']=time(); $q['last_result']=is_array($res)?$res['success']:(bool)$res;
         }
         if(count($ids)===$limit && !empty($q['active'])){ update_option('henkan_background_queue',$q,false); wp_schedule_single_event(time()+3,'henkan_background_worker_event'); } else { $q['active']=0; $q['finished']=time(); update_option('henkan_background_queue',$q,false); if(!empty($settings['auto_clear_cache'])) henkan_trigger_cache_clear(); }
@@ -202,6 +216,7 @@ function henkan_init_plugin() {
 
     require_once HENKAN_PATH . 'includes/process.php';
     require_once HENKAN_PATH . 'includes/admin.php';
+    require_once HENKAN_PATH . 'includes/health.php';
     
     if ( defined( 'WP_CLI' ) && WP_CLI ) {
         require_once HENKAN_PATH . 'includes/cli.php';
@@ -233,6 +248,7 @@ function henkan_enqueue_admin( $hook ) {
         'ajax_url'      => admin_url( 'admin-ajax.php' ),
         'nonce_scan'    => wp_create_nonce( 'henkan_scan_nonce' ),
         'nonce_convert' => wp_create_nonce( 'henkan_convert_nonce' ),
+        'is_media'      => ( $hook === 'upload.php' ),
         'batch_size'    => henkan_get_settings()['batch_size'],
         'enable_bg_queue' => ! empty( henkan_get_settings()['enable_bg_queue'] ),
         'i18n'          => [
@@ -241,7 +257,18 @@ function henkan_enqueue_admin( $hook ) {
             'starting'        => __( 'Starting...', 'henkan-webp-avif-converter' ),
             'error'           => $i18n_error,
             'done'            => __( 'Done!', 'henkan-webp-avif-converter' ),
-            'processing'      => $i18n_processing
+            'processing'      => $i18n_processing,
+            'retry'           => __( 'Retry', 'henkan-webp-avif-converter' ),
+            'server_error'    => __( 'Server error', 'henkan-webp-avif-converter' ),
+            'scanning'        => __( 'Scanning...', 'henkan-webp-avif-converter' ),
+            'ask_quality'     => __( 'Quality for this image (1-100):', 'henkan-webp-avif-converter' ),
+            'confirm_revert'  => __( 'Delete the converted WebP/AVIF/JXL files of this image? The original JPEG/PNG stays.', 'henkan-webp-avif-converter' ),
+            'confirm_revert_all' => __( 'Delete ALL converted WebP/AVIF/JXL files of media-library images whose original JPEG/PNG still exists? Images whose originals were deleted are not touched.', 'henkan-webp-avif-converter' ),
+            'reverting'       => __( 'Reverting...', 'henkan-webp-avif-converter' ),
+            /* translators: 1: Number of reverted images, 2: Number of images that could not be reverted */
+            'revert_done'     => __( 'Revert finished: %1$s reverted, %2$s skipped (originals deleted).', 'henkan-webp-avif-converter' ),
+            'queue_running'   => __( 'Background queue running...', 'henkan-webp-avif-converter' ),
+            'queue_done'      => __( 'Background queue finished.', 'henkan-webp-avif-converter' ),
         ]
     ] );
 }
@@ -374,9 +401,54 @@ function henkan_attachment_needs_conversion( $id, $settings = null ) {
     if ( empty( $checks ) ) return false;
 
     foreach ( $checks as $expected ) {
-        if ( ! file_exists( $expected ) || filesize( $expected ) <= 0 ) return true;
+        if ( file_exists( $expected ) && filesize( $expected ) > 0 ) continue;
+        // A format that was dropped because it was larger than the original counts as done
+        if ( henkan_is_skipped( $id, 'original', pathinfo( $expected, PATHINFO_EXTENSION ) ) ) continue;
+        return true;
     }
     return false;
+}
+
+// --- SKIPPED FORMATS (converted file was not smaller than the original) ---
+
+function henkan_get_skipped( $id ) {
+    $v = $id > 0 ? get_post_meta( $id, '_henkan_skipped', true ) : [];
+    return is_array( $v ) ? $v : [];
+}
+
+function henkan_is_skipped( $id, $size_name, $fmt ) {
+    $v = henkan_get_skipped( $id );
+    return ! empty( $v[ $size_name ] ) && in_array( $fmt, (array) $v[ $size_name ], true );
+}
+
+function henkan_mark_skipped( $id, $size_name, $fmt ) {
+    if ( $id <= 0 ) return;
+    $v = henkan_get_skipped( $id );
+    $list = isset( $v[ $size_name ] ) ? (array) $v[ $size_name ] : [];
+    if ( in_array( $fmt, $list, true ) ) return;
+    $list[] = $fmt;
+    $v[ $size_name ] = $list;
+    update_post_meta( $id, '_henkan_skipped', $v );
+}
+
+function henkan_clear_skipped( $id, $size_name = null, $fmt = null ) {
+    if ( $id <= 0 ) return;
+    if ( $size_name === null ) { delete_post_meta( $id, '_henkan_skipped' ); return; }
+    $v = henkan_get_skipped( $id );
+    if ( ! isset( $v[ $size_name ] ) ) return;
+    $v[ $size_name ] = array_values( array_diff( (array) $v[ $size_name ], [ $fmt ] ) );
+    if ( empty( $v[ $size_name ] ) ) unset( $v[ $size_name ] );
+    if ( empty( $v ) ) delete_post_meta( $id, '_henkan_skipped' );
+    else update_post_meta( $id, '_henkan_skipped', $v );
+}
+
+// --- SPACE SAVINGS COUNTER (shown in Smart Options and wp henkan stats) ---
+
+function henkan_add_savings( $bytes ) {
+    $bytes = (int) $bytes;
+    if ( $bytes === 0 ) return;
+    $total = (int) get_option( 'henkan_total_savings_bytes', 0 ) + $bytes;
+    update_option( 'henkan_total_savings_bytes', max( 0, $total ), false );
 }
 
 function henkan_update_data( $id, $data ) {

@@ -39,26 +39,105 @@ function henkan_add_media_column( $columns ) {
 add_action( 'manage_media_custom_column', 'henkan_media_custom_column_content', 10, 2 );
 function henkan_media_custom_column_content( $column_name, $id ) {
     if ( 'henkan_status' !== $column_name ) return;
+    // henkan_media_column_html() escapes every dynamic value
+    echo henkan_media_column_html( $id ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+}
 
+/**
+ * Status cell of the media list (also returned by the AJAX actions to refresh the cell).
+ *
+ * @return string Escaped HTML.
+ */
+function henkan_media_column_html( $id ) {
+    $id   = (int) $id;
     $mime = get_post_mime_type( $id );
-    
-    if ( in_array( $mime, [ 'image/webp', 'image/avif', 'image/jxl' ] ) ) {
-        echo '<span class="dashicons dashicons-yes" style="color:#46b450;"></span> <span style="color:#46b450; font-weight:bold;">' . esc_html__( 'Native', 'henkan-webp-avif-converter' ) . '</span>';
-        return;
+    $ok   = '<span class="dashicons dashicons-yes" style="color:#46b450;"></span> ';
+    $data = henkan_get_data( $id );
+    $fmts = [];
+    if ( is_array( $data ) && ! empty( $data['original'] ) && is_array( $data['original'] ) ) {
+        $fmts = array_map( 'strtoupper', array_keys( $data['original'] ) );
     }
 
-    if ( ! in_array( $mime, [ 'image/jpeg', 'image/png' ] ) ) {
-        echo '<span style="color:#ccc;">—</span>';
-        return;
+    if ( in_array( $mime, [ 'image/webp', 'image/avif', 'image/jxl' ], true ) ) {
+        $label = ! empty( $fmts ) ? __( 'Converted (original deleted)', 'henkan-webp-avif-converter' ) : __( 'Native', 'henkan-webp-avif-converter' );
+        return $ok . '<span style="color:#46b450; font-weight:bold;">' . esc_html( $label ) . '</span>';
+    }
+    if ( ! in_array( $mime, [ 'image/jpeg', 'image/png' ], true ) ) {
+        return '<span style="color:#ccc;">—</span>';
     }
 
-    $meta = henkan_get_data( $id );
-    if ( ! empty( $meta ) ) {
-        echo '<span class="dashicons dashicons-yes" style="color:#46b450;"></span> <span style="color:#46b450; font-weight:bold;">OK</span>';
+    $state = get_post_meta( $id, '_henkan_state', true );
+    $error = (string) get_post_meta( $id, 'henkan_last_error', true );
+    $html  = '';
+    if ( ! empty( $data ) ) {
+        $html = $ok . '<span style="color:#46b450; font-weight:bold;">OK</span>';
+        if ( ! empty( $fmts ) ) $html .= '<br><small>' . esc_html( implode( ' · ', $fmts ) ) . '</small>';
+    } elseif ( $state === 'skipped' ) {
+        $html = '<span class="dashicons dashicons-minus" style="color:#8c8f94;"></span> <span style="color:#50575e; font-weight:bold;" title="' . esc_attr( $error ) . '">' . esc_html__( 'Original kept', 'henkan-webp-avif-converter' ) . '</span>'
+              . '<br><small>' . esc_html__( 'Converted file was not smaller', 'henkan-webp-avif-converter' ) . '</small>';
     } else {
-        echo '<button type="button" class="button button-small henkan-quick-convert" data-id="' . esc_attr( $id ) . '">' . esc_html__( 'Optimize', 'henkan-webp-avif-converter' ) . '</button>';
-        echo '<span class="henkan-spinner spinner" style="float:none; margin-top:0;"></span>';
+        if ( $state === 'failed' ) {
+            $html .= '<span style="color:#d63638; font-weight:bold;" title="' . esc_attr( $error ) . '">' . esc_html__( 'Failed', 'henkan-webp-avif-converter' ) . '</span><br>';
+        }
+        $html .= '<button type="button" class="button button-small henkan-quick-convert" data-id="' . esc_attr( $id ) . '">' . esc_html( $state === 'failed' ? __( 'Retry', 'henkan-webp-avif-converter' ) : __( 'Optimize', 'henkan-webp-avif-converter' ) ) . '</button>';
     }
+    return $html . '<span class="henkan-spinner spinner" style="float:none; margin-top:0;"></span>';
+}
+
+// Row actions in the media list: re-convert, re-convert with another quality, revert
+add_filter( 'media_row_actions', 'henkan_media_row_actions', 10, 2 );
+function henkan_media_row_actions( $actions, $post ) {
+    if ( ! current_user_can( 'manage_options' ) ) return $actions;
+    if ( ! in_array( get_post_mime_type( $post ), [ 'image/jpeg', 'image/png' ], true ) ) return $actions;
+    $id = (int) $post->ID;
+    $actions['henkan_reconvert'] = '<a href="#" class="henkan-row-action" data-henkan="force" data-id="' . esc_attr( $id ) . '">' . esc_html__( 'Henkan: Re-convert', 'henkan-webp-avif-converter' ) . '</a>';
+    $actions['henkan_quality']   = '<a href="#" class="henkan-row-action" data-henkan="quality" data-id="' . esc_attr( $id ) . '">' . esc_html__( 'Re-convert with quality…', 'henkan-webp-avif-converter' ) . '</a>';
+    if ( henkan_get_data( $id ) ) {
+        $actions['henkan_revert'] = '<a href="#" class="henkan-row-action" data-henkan="revert" data-id="' . esc_attr( $id ) . '">' . esc_html__( 'Revert', 'henkan-webp-avif-converter' ) . '</a>';
+    }
+    return $actions;
+}
+
+// Bulk actions in the media list (list mode). upload.php checks the bulk-media nonce itself.
+add_filter( 'bulk_actions-upload', 'henkan_media_bulk_actions' );
+function henkan_media_bulk_actions( $actions ) {
+    if ( ! current_user_can( 'manage_options' ) ) return $actions;
+    $actions['henkan_convert']   = __( 'Henkan: Convert', 'henkan-webp-avif-converter' );
+    $actions['henkan_reconvert'] = __( 'Henkan: Re-convert (force)', 'henkan-webp-avif-converter' );
+    $actions['henkan_revert']    = __( 'Henkan: Revert', 'henkan-webp-avif-converter' );
+    return $actions;
+}
+
+add_filter( 'handle_bulk_actions-upload', 'henkan_handle_media_bulk_actions', 10, 3 );
+function henkan_handle_media_bulk_actions( $redirect, $action, $ids ) {
+    if ( ! in_array( $action, [ 'henkan_convert', 'henkan_reconvert', 'henkan_revert' ], true ) ) return $redirect;
+    if ( ! current_user_can( 'manage_options' ) ) return $redirect;
+    $done = 0;
+    $fail = 0;
+    foreach ( array_map( 'intval', (array) $ids ) as $id ) {
+        if ( ! in_array( get_post_mime_type( $id ), [ 'image/jpeg', 'image/png' ], true ) ) { $fail++; continue; }
+        if ( $action === 'henkan_revert' ) {
+            $r = henkan_revert_attachment( $id );
+            $r['ok'] ? $done++ : $fail++;
+        } else {
+            $r = henkan_convert_attachment( $id, [ 'force' => $action === 'henkan_reconvert' ] );
+            ( $r['success'] || ! empty( $r['skipped'] ) ) ? $done++ : $fail++;
+        }
+    }
+    if ( ! empty( henkan_get_settings()['auto_clear_cache'] ) ) henkan_trigger_cache_clear();
+    return add_query_arg( [ 'henkan_bulk' => $action, 'henkan_done' => $done, 'henkan_fail' => $fail ], $redirect );
+}
+
+add_action( 'admin_notices', 'henkan_media_bulk_notice' );
+function henkan_media_bulk_notice() {
+    // phpcs:disable WordPress.Security.NonceVerification.Recommended -- display only
+    if ( empty( $_GET['henkan_bulk'] ) || ! current_user_can( 'manage_options' ) ) return;
+    $done = isset( $_GET['henkan_done'] ) ? absint( $_GET['henkan_done'] ) : 0;
+    $fail = isset( $_GET['henkan_fail'] ) ? absint( $_GET['henkan_fail'] ) : 0;
+    // phpcs:enable
+    /* translators: 1: Number of processed images, 2: Number of images that were not processed */
+    $msg = sprintf( __( 'Henkan: %1$d images processed, %2$d skipped (not JPEG/PNG, failed or original deleted).', 'henkan-webp-avif-converter' ), $done, $fail );
+    echo '<div class="notice notice-' . ( $fail ? 'warning' : 'success' ) . ' is-dismissible"><p>' . esc_html( $msg ) . '</p></div>';
 }
 
 add_action( 'wp_dashboard_setup', 'henkan_add_dashboard_widgets' );
@@ -101,6 +180,8 @@ function henkan_sanitize_settings( $input ) {
         'bulk_only_unconverted', 'enable_bg_queue',
         // Smart Options
         'smart_quality_enabled', 'integrity_check_enabled', 'max_width_enabled',
+        // Encoder / delivery (2.6.0)
+        'skip_larger', 'png_lossless', 'keep_metadata', 'picture_attachment_images', 'webp_sharp_yuv',
     ];
     foreach ( $bool_keys as $key ) {
         $clean[ $key ] = ! empty( $input[ $key ] ) ? 1 : 0;
@@ -118,6 +199,12 @@ function henkan_sanitize_settings( $input ) {
     $clean['smart_quality_thumb'] = isset( $input['smart_quality_thumb'] ) ? max( 1, min( 100, absint( $input['smart_quality_thumb'] ) ) ) : 70;
     $clean['max_width_px']        = isset( $input['max_width_px'] ) ? max( 100, min( 10000, absint( $input['max_width_px'] ) ) ) : 2000;
 
+    // Encoder options
+    $clean['avif_speed']      = isset( $input['avif_speed'] ) ? min( 10, absint( $input['avif_speed'] ) ) : $defaults['avif_speed'];
+    $clean['webp_method']     = isset( $input['webp_method'] ) ? min( 6, absint( $input['webp_method'] ) ) : $defaults['webp_method'];
+    $clean['encoder_threads'] = isset( $input['encoder_threads'] ) ? max( 1, min( 16, absint( $input['encoder_threads'] ) ) ) : $defaults['encoder_threads'];
+    $clean['exec_timeout']    = isset( $input['exec_timeout'] ) ? max( 10, min( 600, absint( $input['exec_timeout'] ) ) ) : $defaults['exec_timeout'];
+
     // Preserve Smart Options when saving a tab that does not render them
     $old = henkan_get_settings();
     if ( empty( $input['_smart_tab'] ) ) {
@@ -130,9 +217,10 @@ function henkan_sanitize_settings( $input ) {
         $clean['custom_folders'] = $old['custom_folders'];
     }
 
-    $webp_allowed = [ 'cwebp', 'gd' ];
-    $avif_allowed = [ 'avifenc', 'imagick', 'gd' ];
-    $jxl_allowed  = [ 'cjxl', 'imagick' ];
+    // 'imagick' = ImageMagick command line (magick), 'imagick_ext' = PHP Imagick extension
+    $webp_allowed = [ 'cwebp', 'gd', 'imagick_ext' ];
+    $avif_allowed = [ 'avifenc', 'imagick', 'imagick_ext', 'gd' ];
+    $jxl_allowed  = [ 'cjxl', 'imagick', 'imagick_ext' ];
 
     $clean['webp_converter'] = ( isset( $input['webp_converter'] ) && in_array( $input['webp_converter'], $webp_allowed, true ) ) ? $input['webp_converter'] : 'cwebp';
     $clean['avif_converter'] = ( isset( $input['avif_converter'] ) && in_array( $input['avif_converter'], $avif_allowed, true ) ) ? $input['avif_converter'] : 'gd'; // same default as henkan_default_settings()
@@ -180,7 +268,7 @@ function henkan_detect_cache_plugin() {
     if ( function_exists( 'w3tc_flush_all' ) ) return 'W3 Total Cache';
     if ( function_exists( 'wp_cache_clear_cache' ) ) return 'WP Super Cache';
     if ( class_exists( 'autoptimizeCache' ) ) return 'Autoptimize';
-    if ( class_exists( 'LiteSpeed_Cache_API' ) ) return 'LiteSpeed Cache';
+    if ( has_action( 'litespeed_purge_all' ) || class_exists( 'LiteSpeed_Cache_API' ) ) return 'LiteSpeed Cache';
     return false;
 }
 
@@ -200,8 +288,15 @@ function henkan_admin_page() {
     $is_nginx = ( $server_type === 'nginx' );
     $cache_plugin = henkan_detect_cache_plugin();
 
-    $webp_supported = function_exists( 'imagewebp' );
-    $avif_supported = function_exists( 'imageavif' );
+    // A format is supported if any of its converters works (binary, GD or Imagick)
+    $henkan_fmt_ok = function( $fmt ) use ( $s ) {
+        foreach ( henkan_engine_chain( $fmt, $s ) as $m ) {
+            if ( henkan_engine_available( $m, $fmt ) ) return true;
+        }
+        return false;
+    };
+    $webp_supported = $henkan_fmt_ok( 'webp' );
+    $avif_supported = $henkan_fmt_ok( 'avif' );
 
     $upload_dir_info = wp_get_upload_dir();
     $uploads_path = $upload_dir_info['basedir'];
@@ -209,7 +304,8 @@ function henkan_admin_page() {
 
     $badge_webp = $webp_supported ? '<span class="hk-pill hk-pill-ok">OK</span>' : '<span class="hk-pill hk-pill-bad">' . esc_html__( 'Missing', 'henkan-webp-avif-converter' ) . '</span>';
     $badge_avif = $avif_supported ? '<span class="hk-pill hk-pill-ok">OK</span>' : '<span class="hk-pill hk-pill-bad">' . esc_html__( 'Missing', 'henkan-webp-avif-converter' ) . '</span>';
-    $badge_jxl  = '<span class="hk-pill hk-pill-exp">' . esc_html__( 'Experimental', 'henkan-webp-avif-converter' ) . '</span>';
+    $badge_jxl  = '<span class="hk-pill hk-pill-exp">' . esc_html__( 'Experimental', 'henkan-webp-avif-converter' ) . '</span>'
+                . ( $henkan_fmt_ok( 'jxl' ) ? '' : ' <span class="hk-pill hk-pill-bad">' . esc_html__( 'Missing', 'henkan-webp-avif-converter' ) . '</span>' );
 
     $tabs = [
         'general'  => __( 'General', 'henkan-webp-avif-converter' ),
@@ -268,7 +364,7 @@ function henkan_admin_page() {
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[enable_webp]" value="1" <?php checked( 1, $s['enable_webp'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Enable WebP', 'henkan-webp-avif-converter' ); ?> <?php echo wp_kses_post( $badge_webp ); ?></span></label>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[enable_avif]" value="1" <?php checked( 1, $s['enable_avif'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Enable AVIF', 'henkan-webp-avif-converter' ); ?> <?php echo wp_kses_post( $badge_avif ); ?></span></label>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[enable_jxl]" value="1" <?php checked( 1, $s['enable_jxl'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Enable JPEG XL', 'henkan-webp-avif-converter' ); ?> <?php echo wp_kses_post( $badge_jxl ); ?></span></label>
-                            <p class="hk-desc"><?php esc_html_e( 'Note: Multiple formats can be generated simultaneously. Primary format priority (if originals are deleted): WebP > AVIF > JXL.', 'henkan-webp-avif-converter' ); ?></p>
+                            <p class="hk-desc"><?php esc_html_e( 'Note: Multiple formats can be generated simultaneously. Primary format priority (if originals are deleted): WebP > AVIF > JXL. Delivery to browsers (<picture> and server rules): AVIF > WebP > JXL.', 'henkan-webp-avif-converter' ); ?></p>
                         </div>
 
                         <div class="hk-card">
@@ -276,26 +372,50 @@ function henkan_admin_page() {
                             <div class="hk-form-grid">
                                 <label class="hk-label" for="henkan-webp-converter"><?php esc_html_e( 'WebP Converter', 'henkan-webp-avif-converter' ); ?></label>
                                 <select id="henkan-webp-converter" class="hk-input" name="henkan_settings[webp_converter]">
-                                    <option value="cwebp" <?php selected( 'cwebp', $s['webp_converter'] ?? 'cwebp' ); ?>>cwebp (exec)</option>
+                                    <option value="cwebp" <?php selected( 'cwebp', $s['webp_converter'] ?? 'cwebp' ); ?>>cwebp (CLI)</option>
                                     <option value="gd" <?php selected( 'gd', $s['webp_converter'] ?? 'cwebp' ); ?>>GD (imagewebp)</option>
+                                    <option value="imagick_ext" <?php selected( 'imagick_ext', $s['webp_converter'] ?? 'cwebp' ); ?>>Imagick (PHP extension)</option>
                                 </select>
 
                                 <label class="hk-label" for="henkan-avif-converter"><?php esc_html_e( 'AVIF Converter', 'henkan-webp-avif-converter' ); ?></label>
                                 <select id="henkan-avif-converter" class="hk-input" name="henkan_settings[avif_converter]">
-                                    <option value="avifenc" <?php selected( 'avifenc', $s['avif_converter'] ?? 'avifenc' ); ?>>avifenc (exec)</option>
-                                    <option value="imagick" <?php selected( 'imagick', $s['avif_converter'] ?? 'avifenc' ); ?>>ImageMagick (exec)</option>
-                                    <option value="gd" <?php selected( 'gd', $s['avif_converter'] ?? 'avifenc' ); ?>>GD (imageavif)</option>
+                                    <option value="avifenc" <?php selected( 'avifenc', $s['avif_converter'] ?? 'gd' ); ?>>avifenc (CLI)</option>
+                                    <option value="imagick" <?php selected( 'imagick', $s['avif_converter'] ?? 'gd' ); ?>>ImageMagick (CLI, magick)</option>
+                                    <option value="imagick_ext" <?php selected( 'imagick_ext', $s['avif_converter'] ?? 'gd' ); ?>>Imagick (PHP extension)</option>
+                                    <option value="gd" <?php selected( 'gd', $s['avif_converter'] ?? 'gd' ); ?>>GD (imageavif)</option>
                                 </select>
 
                                 <label class="hk-label" for="henkan-jxl-converter"><?php esc_html_e( 'JXL Converter', 'henkan-webp-avif-converter' ); ?></label>
                                 <select id="henkan-jxl-converter" class="hk-input" name="henkan_settings[jxl_converter]">
-                                    <option value="cjxl" <?php selected( 'cjxl', $s['jxl_converter'] ?? 'cjxl' ); ?>>cjxl (exec)</option>
-                                    <option value="imagick" <?php selected( 'imagick', $s['jxl_converter'] ?? 'cjxl' ); ?>>ImageMagick (exec)</option>
+                                    <option value="cjxl" <?php selected( 'cjxl', $s['jxl_converter'] ?? 'cjxl' ); ?>>cjxl (CLI)</option>
+                                    <option value="imagick" <?php selected( 'imagick', $s['jxl_converter'] ?? 'cjxl' ); ?>>ImageMagick (CLI, magick)</option>
+                                    <option value="imagick_ext" <?php selected( 'imagick_ext', $s['jxl_converter'] ?? 'cjxl' ); ?>>Imagick (PHP extension)</option>
                                 </select>
 
                                 <label class="hk-label" for="henkan-quality"><?php esc_html_e( 'Quality (1-100)', 'henkan-webp-avif-converter' ); ?></label>
                                 <input id="henkan-quality" type="number" name="henkan_settings[quality]" value="<?php echo esc_attr( $s['quality'] ); ?>" min="1" max="100" class="hk-input hk-input-small">
                             </div>
+                        </div>
+                        <div class="hk-card">
+                            <h3><?php esc_html_e( 'Encoder', 'henkan-webp-avif-converter' ); ?></h3>
+                            <label class="hk-toggle"><input type="checkbox" name="henkan_settings[skip_larger]" value="1" <?php checked( 1, $s['skip_larger'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Keep the original if the converted file is not smaller', 'henkan-webp-avif-converter' ); ?></span></label>
+                            <label class="hk-toggle"><input type="checkbox" name="henkan_settings[png_lossless]" value="1" <?php checked( 1, $s['png_lossless'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Lossless WebP / JPEG XL for PNG (graphics, screenshots)', 'henkan-webp-avif-converter' ); ?></span></label>
+                            <label class="hk-toggle"><input type="checkbox" name="henkan_settings[keep_metadata]" value="1" <?php checked( 1, $s['keep_metadata'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Keep metadata (EXIF / XMP)', 'henkan-webp-avif-converter' ); ?></span></label>
+                            <label class="hk-toggle"><input type="checkbox" name="henkan_settings[webp_sharp_yuv]" value="1" <?php checked( 1, $s['webp_sharp_yuv'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'WebP: sharp colored edges (sharp_yuv) – better lines and text, slower', 'henkan-webp-avif-converter' ); ?></span></label>
+                            <div class="hk-form-grid">
+                                <label class="hk-label" for="henkan-webp-method"><?php esc_html_e( 'WebP effort (0 = fastest, 6 = best quality per file size)', 'henkan-webp-avif-converter' ); ?></label>
+                                <input id="henkan-webp-method" type="number" name="henkan_settings[webp_method]" value="<?php echo esc_attr( $s['webp_method'] ); ?>" min="0" max="6" class="hk-input hk-input-small">
+
+                                <label class="hk-label" for="henkan-avif-speed"><?php esc_html_e( 'AVIF speed (0 = smallest, 10 = fastest)', 'henkan-webp-avif-converter' ); ?></label>
+                                <input id="henkan-avif-speed" type="number" name="henkan_settings[avif_speed]" value="<?php echo esc_attr( $s['avif_speed'] ); ?>" min="0" max="10" class="hk-input hk-input-small">
+
+                                <label class="hk-label" for="henkan-threads"><?php esc_html_e( 'Encoder threads (CLI converters)', 'henkan-webp-avif-converter' ); ?></label>
+                                <input id="henkan-threads" type="number" name="henkan_settings[encoder_threads]" value="<?php echo esc_attr( $s['encoder_threads'] ); ?>" min="1" max="16" class="hk-input hk-input-small">
+
+                                <label class="hk-label" for="henkan-timeout"><?php esc_html_e( 'Converter timeout (seconds)', 'henkan-webp-avif-converter' ); ?></label>
+                                <input id="henkan-timeout" type="number" name="henkan_settings[exec_timeout]" value="<?php echo esc_attr( $s['exec_timeout'] ); ?>" min="10" max="600" class="hk-input hk-input-small">
+                            </div>
+                            <p class="hk-desc"><?php esc_html_e( 'Command line converters are started without a shell (proc_open). A converter that hangs is stopped after the timeout and the next converter is tried. Lossless PNG files are often larger than the original; with the size check on, the original is kept in that case. WebP effort and sharp_yuv apply to cwebp and the Imagick extension, not to GD.', 'henkan-webp-avif-converter' ); ?></p>
                         </div>
                         <div class="hk-actions"><?php submit_button( __( 'Save', 'henkan-webp-avif-converter' ), 'primary', 'submit', false ); ?></div>
                     </div>
@@ -329,7 +449,9 @@ function henkan_admin_page() {
                         <div class="hk-card">
                             <h3><?php esc_html_e( 'Frontend', 'henkan-webp-avif-converter' ); ?></h3>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[picture_filter_enabled]" value="1" <?php checked( 1, $s['picture_filter_enabled'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Frontend <picture>', 'henkan-webp-avif-converter' ); ?></span></label>
+                            <label class="hk-toggle"><input type="checkbox" name="henkan_settings[picture_attachment_images]" value="1" <?php checked( 1, $s['picture_attachment_images'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( '<picture> also for featured images and theme images', 'henkan-webp-avif-converter' ); ?></span></label>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[enable_lazy_loading]" value="1" <?php checked( 1, $s['enable_lazy_loading'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Native Lazy-Loading', 'henkan-webp-avif-converter' ); ?></span></label>
+                            <p class="hk-desc"><?php esc_html_e( 'Lazy-Loading is only added when WordPress\' own lazy-loading is turned off (e.g. by the theme). The first images of a post and images marked fetchpriority="high" are never lazy-loaded, so the main image (LCP) loads immediately.', 'henkan-webp-avif-converter' ); ?></p>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[auto_clear_cache]" value="1" <?php checked( 1, $s['auto_clear_cache'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Auto-Cache-Clear', 'henkan-webp-avif-converter' ); ?></span></label>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[enable_bg_queue]" value="1" <?php checked( 1, $s['enable_bg_queue'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Enable Background Queue (Bulk Only)', 'henkan-webp-avif-converter' ); ?></span></label>
                         </div>
@@ -337,6 +459,12 @@ function henkan_admin_page() {
                             <h3><?php esc_html_e( 'Files', 'henkan-webp-avif-converter' ); ?></h3>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[keep_original]" value="1" <?php checked( 1, $s['keep_original'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Keep Originals', 'henkan-webp-avif-converter' ); ?></span></label>
                             <label class="hk-toggle"><input type="checkbox" name="henkan_settings[debug]" value="1" <?php checked( 1, $s['debug'] ); ?>><span class="hk-slider"></span><span><?php esc_html_e( 'Debug Logging', 'henkan-webp-avif-converter' ); ?></span></label>
+                        </div>
+                        <div class="hk-card hk-accent-amber">
+                            <h3><?php esc_html_e( 'Revert', 'henkan-webp-avif-converter' ); ?></h3>
+                            <p class="hk-desc"><?php esc_html_e( 'Deletes the WebP/AVIF/JXL files of all media-library images whose original JPEG/PNG still exists, and resets their Henkan status. Images whose originals were deleted ("Keep Originals" off) are not touched. Single images can be reverted in the media library (list view).', 'henkan-webp-avif-converter' ); ?></p>
+                            <button type="button" id="henkan_revert_all" class="button button-secondary"><?php esc_html_e( 'Revert all conversions', 'henkan-webp-avif-converter' ); ?></button>
+                            <p id="henkan_revert_status" class="hk-mini" aria-live="polite"></p>
                         </div>
                         <div class="hk-card">
                             <h3><?php esc_html_e( 'Exclusions', 'henkan-webp-avif-converter' ); ?></h3>
@@ -369,6 +497,9 @@ function henkan_admin_page() {
                             'bulk_only_unconverted', 'picture_filter_enabled',
                             'enable_lazy_loading', 'enable_bg_queue', 'auto_clear_cache',
                             'scan_uploads_dir', 'scan_theme_dir', 'custom_folders', 'exclusions',
+                            'skip_larger', 'png_lossless', 'keep_metadata', 'avif_speed',
+                            'encoder_threads', 'exec_timeout', 'picture_attachment_images',
+                            'webp_method', 'webp_sharp_yuv',
                         ];
                         echo '<input type="hidden" name="henkan_settings[_smart_tab]" value="1">';
                         foreach ( $hidden_keys as $hk ) {
@@ -485,15 +616,15 @@ wp henkan stats</pre>
 <textarea class="hk-code" rows="15" readonly onclick="this.select()">
 &lt;IfModule mod_rewrite.c&gt;
   RewriteEngine On
-  RewriteCond %{HTTP_ACCEPT} image/jxl
-  RewriteCond %{DOCUMENT_ROOT}/$1.jxl -f
-  RewriteRule ^(.+)\.(jpe?g|png)$ $1.jxl [T=image/jxl,E=accept:1,L]
   RewriteCond %{HTTP_ACCEPT} image/avif
   RewriteCond %{DOCUMENT_ROOT}/$1.avif -f
   RewriteRule ^(.+)\.(jpe?g|png)$ $1.avif [T=image/avif,E=accept:1,L]
   RewriteCond %{HTTP_ACCEPT} image/webp
   RewriteCond %{DOCUMENT_ROOT}/$1.webp -f
   RewriteRule ^(.+)\.(jpe?g|png)$ $1.webp [T=image/webp,E=accept:1,L]
+  RewriteCond %{HTTP_ACCEPT} image/jxl
+  RewriteCond %{DOCUMENT_ROOT}/$1.jxl -f
+  RewriteRule ^(.+)\.(jpe?g|png)$ $1.jxl [T=image/jxl,E=accept:1,L]
 &lt;/IfModule&gt;
 &lt;IfModule mod_headers.c&gt;
   Header append Vary Accept env=REDIRECT_accept
@@ -502,21 +633,19 @@ wp henkan stats</pre>
                             </div>
                             <div id="tab-nginx" class="henkan-tab-content" <?php echo $is_nginx ? '' : 'hidden'; ?>>
                                 <p class="hk-label"><?php esc_html_e( 'http block:', 'henkan-webp-avif-converter' ); ?></p>
-<textarea class="hk-code" rows="7" readonly onclick="this.select()">
-map $http_accept $webp_avif_jxl_suffix {
-    default "";
-    "~*jxl" ".jxl";
-    "~*avif" ".avif";
-    "~*webp" ".webp";
-}
+<textarea class="hk-code" rows="5" readonly onclick="this.select()">
+map $http_accept $henkan_avif { default ""; "~*image/avif" ".avif"; }
+map $http_accept $henkan_webp { default ""; "~*image/webp" ".webp"; }
+map $http_accept $henkan_jxl  { default ""; "~*image/jxl"  ".jxl"; }
 </textarea>
                                 <p class="hk-label"><?php esc_html_e( 'server block:', 'henkan-webp-avif-converter' ); ?></p>
 <textarea class="hk-code" rows="5" readonly onclick="this.select()">
-location ~* ^.+\.(png|jpe?g)$ {
+location ~* ^(?&lt;henkan_base&gt;.+)\.(?:jpe?g|png)$ {
     add_header Vary Accept;
-    try_files $uri$webp_avif_jxl_suffix $uri =404;
+    try_files $henkan_base$henkan_avif $henkan_base$henkan_webp $henkan_base$henkan_jxl $uri =404;
 }
 </textarea>
+                                <p class="hk-mini"><?php esc_html_e( 'Henkan names converted files image.webp (not image.jpg.webp). Rules from Henkan 2.5.x and older must be replaced.', 'henkan-webp-avif-converter' ); ?></p>
                             </div>
                         </div>
                     </div>
@@ -534,6 +663,18 @@ wp henkan convert
 
 <span class="hk-comment"># <?php esc_html_e( 'Force all:', 'henkan-webp-avif-converter' ); ?></span>
 wp henkan convert --force
+
+<span class="hk-comment"># <?php esc_html_e( 'Only some images / one format / preview:', 'henkan-webp-avif-converter' ); ?></span>
+wp henkan convert --ids=12,34 --format=avif
+wp henkan convert --dry-run
+
+<span class="hk-comment"># <?php esc_html_e( 'Undo conversions (originals must exist):', 'henkan-webp-avif-converter' ); ?></span>
+wp henkan revert --ids=12,34
+wp henkan revert --all --yes
+
+<span class="hk-comment"># <?php esc_html_e( 'Statistics:', 'henkan-webp-avif-converter' ); ?></span>
+wp henkan stats
+wp henkan stats --recalculate
 
 <span class="hk-comment"># <?php esc_html_e( 'Repair thumbnails (older bulk conversions with "Keep original" off):', 'henkan-webp-avif-converter' ); ?></span>
 wp henkan repair</pre>

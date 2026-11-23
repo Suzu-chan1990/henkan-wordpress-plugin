@@ -2,6 +2,54 @@
 
 All notable changes to **Henkan - WebP & AVIF Converter** are documented in this file.
 
+## [2.6.1]
+### Fixes
+* **WebP quality settings:** New "WebP effort" (cwebp `-m`, 0-6) and "sharp colored edges" (cwebp `-sharp_yuv`) in General > Encoder. Effort 6 gives better quality at the same file size; sharp_yuv keeps colored lines and text crisp. Both make the conversion slower. Defaults (effort 2, sharp_yuv off) keep the previous output.
+* **Bulk Optimizer:** With "Keep Originals" off, the folder scan also listed JPEGs of media-library images that the same run converted and deleted moments before. These ended with "Error: Path not allowed"; they are now reported as "already converted".
+
+## [2.6.0]
+### Fixes
+* **AVIF quality:** avifenc 1.0+ reads `-q` as quality 0-100, but Henkan converted the quality to the old 0-63 quantizer scale first. Quality 82 became `-q 11`, so AVIF files made with avifenc were heavily over-compressed. The quality is now passed unchanged.
+* **Nginx rules:** The old rules looked for `image.jpg.webp`, but Henkan writes `image.webp`, so they never delivered a converted file. New rules with one `map` per format; a missing AVIF now falls back to WebP. Replace the old rules on your server.
+* **One delivery order everywhere:** `<picture>`, Apache and Nginx rules now all prefer AVIF > WebP > JPEG XL (the rules used JXL first, the changelog said WebP first).
+* **Lazy-Loading:** Henkan no longer adds `loading="lazy"` on top of WordPress core. It only adds it when core lazy-loading is turned off, and then skips the first images and `fetchpriority="high"` images, so the LCP image is never delayed.
+* **Featured images:** `<picture>` is now also used for featured images and every `wp_get_attachment_image()` output (themes, blocks, widgets). Can be turned off in Advanced. Feeds are left alone.
+* **Uploads:** New uploads now use the same pipeline as bulk conversion, so Max Output Width and Quality by Image Size also apply to uploads.
+* **Bulk "Force":** Re-encodes images that are already converted (before, existing files were kept and "Force" did nothing). Only images whose original JPEG/PNG still exists are re-encoded.
+* **Space saved:** The statistic in Smart Options was never updated. Henkan now counts the saved bytes per converted file; `wp henkan stats --recalculate` measures existing files.
+* **`wp henkan stats`:** The command was documented but missing; it is now available.
+* **LiteSpeed Cache:** Purges through the current `litespeed_purge_all` hook (the old API class only as fallback).
+* Failed converters no longer leave partial output files behind.
+
+### Converter Engine
+* **No shell:** Command line converters are started with `proc_open()` and an argument array instead of `exec()`. `exec()` is only used as a fallback when a host disables `proc_open()`.
+* **Timeout:** A hanging converter is killed after the "Converter timeout" (default 120 s) and the next converter is tried.
+* **Real error messages:** The converter's own error output is stored and shown in the log and the media library.
+* **Imagick extension:** New converter "Imagick (PHP extension)" for WebP, AVIF and JPEG XL, without starting a process. "ImageMagick (CLI)" is the former "ImageMagick (exec)" option.
+* **Size check:** If a converted file is not smaller than the original, it is dropped and the original is served (setting, on by default). These images get the status "Original kept" and are not scanned again.
+* **Encoder options:** Lossless WebP/JPEG XL for PNG, keep EXIF/XMP, AVIF speed (0-10), encoder threads.
+
+### Media Library
+* **Row actions:** "Henkan: Re-convert", "Re-convert with quality…" and "Revert" in the list view.
+* **Bulk actions:** "Henkan: Convert", "Henkan: Re-convert (force)" and "Henkan: Revert".
+* **Status column:** Shows the created formats, "Failed" with the error as tooltip, and "Original kept".
+
+### Revert
+* **Revert all** in Advanced deletes the WebP/AVIF/JXL files of all images whose original JPEG/PNG still exists. A converted file is only ever deleted when its original is next to it, so images converted with "Keep Originals" off are never touched.
+
+### Site Health
+* New tests "Henkan image converters" (which converter works per format) and "Henkan image delivery" (checks `<picture>` or makes a test request to see whether the server rewrite rules work).
+* New "Henkan" section in Site Health > Info with converters, binaries, GD/Imagick support and settings.
+
+### WP-CLI
+* `wp henkan convert`: new `--ids`, `--format`, `--quality` and `--dry-run`; `--limit=-1` for all; summary with converted / kept / failed.
+* `wp henkan revert --ids=… | --all [--yes] [--dry-run]`
+* `wp henkan stats [--recalculate]`
+
+### For Developers
+* Actions: `henkan_converted`, `henkan_attachment_converted`, `henkan_reverted`, `henkan_cache_cleared`.
+* Filters: `henkan_quality`, `henkan_encoder_args`, `henkan_settings`, `henkan_picture_enabled`.
+
 ## [2.5.1]
 ### Fixes
 * **Plugin images:** The 2.5.0 download contained an extra `header-banner.png` and the old banner and icon. The plugin now ships exactly two images, `assets/banner-772x250.png` (new banner) and `assets/icon-256x256.png` (new icon), and the settings page header shows `banner-772x250.png`.

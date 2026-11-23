@@ -7,6 +7,8 @@ add_action( 'wp_ajax_henkan_clear_cache', 'henkan_ajax_clear_cache' );
 add_action( 'wp_ajax_henkan_queue_start', 'henkan_queue_start' );
 add_action( 'wp_ajax_henkan_queue_status', 'henkan_queue_status_ajax' );
 add_action( 'wp_ajax_henkan_queue_cancel', 'henkan_queue_cancel' );
+add_action( 'wp_ajax_henkan_revert', 'henkan_ajax_revert' );
+add_action( 'wp_ajax_henkan_revert_batch', 'henkan_ajax_revert_batch' );
 
 function henkan_queue_start() {
     if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( [ 'msg' => 'Unauthorized' ] );
@@ -96,6 +98,7 @@ function henkan_scan() {
             'has_more'      => $more_ids || $has_fs,
             'phase'         => $more_ids ? 'ids' : 'fs',
             'fs_cursor'     => 0,
+            'server_time'   => time(),
         ] );
     }
 
@@ -174,31 +177,25 @@ function henkan_convert() {
         $id = intval( $item );
         $file = get_attached_file( $id );
         if ( $file ) {
-            $res = henkan_convert_file( $file, $id, 'original' );
-            $meta = wp_get_attachment_metadata( $id );
-            if ( ! empty( $meta['sizes'] ) ) {
-                $base = dirname( $file );
-                foreach ( $meta['sizes'] as $size => $data ) { 
-                    henkan_convert_file( $base.'/'.$data['file'], $id, $size ); 
-                }
-            }
-            
-            if ( is_array( $res ) ) {
-                if ( $res['success'] ) {
-                    $gen = strtoupper( implode( ', ', $res['generated'] ) );
-                    $fail = empty( $res['failed'] ) ? '' : __( ' | Failed: ', 'henkan-webp-avif-converter' ) . implode( ', ', $res['failed'] );
-                    /* translators: 1: ID, 2: Generated formats, 3: Failed formats */
-                    $msg = sprintf( __( 'ID %1$d optimized [%2$s]%3$s', 'henkan-webp-avif-converter' ), $id, $gen, $fail );
-                } else {
-                    $fail_reasons = empty( $res['failed'] ) ? __( 'Unknown error', 'henkan-webp-avif-converter' ) : implode( ', ', $res['failed'] );
-                    /* translators: 1: ID, 2: Error reasons */
-                    $msg = sprintf( __( 'ID %1$d completely failed: %2$s', 'henkan-webp-avif-converter' ), $id, $fail_reasons );
-                }
+            // force: re-encode existing files (bulk "Force" / media "Re-convert"); quality: one-off quality
+            $force   = ! empty( $_POST['force'] );
+            $quality = isset( $_POST['quality'] ) ? min( 100, absint( $_POST['quality'] ) ) : 0;
+            $res = henkan_convert_attachment( $id, [ 'force' => $force, 'quality' => $quality ] );
+
+            if ( $res['success'] ) {
+                $gen = strtoupper( implode( ', ', $res['generated'] ) );
+                $fail = empty( $res['failed'] ) ? '' : __( ' | Failed: ', 'henkan-webp-avif-converter' ) . implode( ', ', $res['failed'] );
+                /* translators: 1: ID, 2: Generated formats, 3: Failed formats */
+                $msg = sprintf( __( 'ID %1$d optimized [%2$s]%3$s', 'henkan-webp-avif-converter' ), $id, $gen, $fail );
+            } elseif ( ! empty( $res['skipped'] ) && empty( $res['failed'] ) ) {
+                /* translators: 1: ID, 2: Formats */
+                $msg = sprintf( __( 'ID %1$d kept as original: %2$s not smaller', 'henkan-webp-avif-converter' ), $id, strtoupper( implode( ', ', $res['skipped'] ) ) );
             } else {
-                /* translators: %d: ID */
-                $msg = $res ? sprintf( __( 'ID %d optimiert', 'henkan-webp-avif-converter' ), $id ) : sprintf( __( 'ID %d checked', 'henkan-webp-avif-converter' ), $id );
+                $fail_reasons = empty( $res['failed'] ) ? __( 'Unknown error', 'henkan-webp-avif-converter' ) : implode( ', ', $res['failed'] );
+                /* translators: 1: ID, 2: Error reasons */
+                $msg = sprintf( __( 'ID %1$d completely failed: %2$s', 'henkan-webp-avif-converter' ), $id, $fail_reasons );
             }
-            wp_send_json_success( [ 'msg' => $msg ] );
+            wp_send_json_success( [ 'msg' => $msg, 'column_html' => henkan_media_column_html( $id ) ] );
         } else {
             /* translators: %d: Attachment ID */
             $msg_err = sprintf( __( 'File missing ID %d', 'henkan-webp-avif-converter' ), $id );
@@ -206,11 +203,23 @@ function henkan_convert() {
         }
     } else {
         $path = wp_normalize_path( $item );
-        // Only allow files inside the configured scan roots
-        if ( ! henkan_is_allowed_path( $path ) ) {
+        // Only allow files inside the configured scan roots. A file that no longer exists (e.g. the
+        // media-library pass of this run already converted it and deleted the JPEG) is checked by
+        // its folder, so it reaches the "already converted" branch below instead of failing here.
+        if ( ! henkan_is_allowed_path( file_exists( $path ) ? $path : dirname( $path ) ) ) {
             wp_send_json_error( [ 'msg' => __( 'Path not allowed', 'henkan-webp-avif-converter' ) ] );
         }
         if ( file_exists( $path ) ) {
+            if ( ! empty( $_POST['force'] ) ) {
+                // Force: the JPEG/PNG exists, so its converted copies can be encoded again
+                // Files written since this bulk run started (by its media-library pass) are kept
+                $since = isset( $_POST['force_since'] ) ? absint( $_POST['force_since'] ) : 0;
+                $stem  = dirname( $path ) . '/' . pathinfo( $path, PATHINFO_FILENAME );
+                foreach ( [ 'webp', 'avif', 'jxl' ] as $fmt ) {
+                    $f = $stem . '.' . $fmt;
+                    if ( file_exists( $f ) && ( ! $since || filemtime( $f ) < $since ) ) wp_delete_file( $f );
+                }
+            }
             $res = henkan_convert_file( $path, 0, 'custom' );
             if ( is_array( $res ) ) {
                 if ( $res['success'] ) {
@@ -218,14 +227,14 @@ function henkan_convert() {
                     $fail = empty( $res['failed'] ) ? '' : __( ' | Failed: ', 'henkan-webp-avif-converter' ) . implode( ', ', $res['failed'] );
                     /* translators: 1: File name, 2: Generated formats, 3: Failed formats */
                     $msg = sprintf( __( '%1$s optimized [%2$s]%3$s', 'henkan-webp-avif-converter' ), basename( $path ), $gen, $fail );
+                } elseif ( ! empty( $res['skipped'] ) && empty( $res['failed'] ) ) {
+                    /* translators: 1: File name, 2: Formats */
+                    $msg = sprintf( __( '%1$s kept as original: %2$s not smaller', 'henkan-webp-avif-converter' ), basename( $path ), strtoupper( implode( ', ', $res['skipped'] ) ) );
                 } else {
                     $fail_reasons = empty( $res['failed'] ) ? __( 'Unknown error', 'henkan-webp-avif-converter' ) : implode( ', ', $res['failed'] );
                     /* translators: 1: File name, 2: Error reasons */
                     $msg = sprintf( __( '%1$s completely failed: %2$s', 'henkan-webp-avif-converter' ), basename( $path ), $fail_reasons );
                 }
-            } else {
-                /* translators: %s: File name */
-                $msg = $res ? sprintf( __( '%s optimiert', 'henkan-webp-avif-converter' ), basename( $path ) ) : sprintf( __( '%s checked', 'henkan-webp-avif-converter' ), basename( $path ) );
             }
             wp_send_json_success( [ 'msg' => $msg ] );
         } else {
@@ -256,4 +265,24 @@ function henkan_ajax_clear_cache() {
     }
     henkan_trigger_cache_clear();
     wp_send_json_success( [ 'msg' => __( 'Cache cleared successfully.', 'henkan-webp-avif-converter' ) ] );
+}
+
+function henkan_ajax_revert() {
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( [ 'msg' => 'Unauthorized' ] );
+    check_ajax_referer( 'henkan_convert_nonce', 'nonce' );
+    $id = isset( $_POST['item'] ) ? absint( $_POST['item'] ) : 0;
+    if ( ! $id ) wp_send_json_error( [ 'msg' => __( 'No item', 'henkan-webp-avif-converter' ) ] );
+    $r = henkan_revert_attachment( $id );
+    if ( ! $r['ok'] ) wp_send_json_error( [ 'msg' => $r['msg'] ] );
+    if ( ! empty( henkan_get_settings()['auto_clear_cache'] ) ) henkan_trigger_cache_clear();
+    wp_send_json_success( [ 'msg' => $r['msg'], 'column_html' => henkan_media_column_html( $id ) ] );
+}
+
+// "Revert all": one batch per request, the browser keeps calling until "more" is false
+function henkan_ajax_revert_batch() {
+    if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( [ 'msg' => 'Unauthorized' ] );
+    check_ajax_referer( 'henkan_convert_nonce', 'nonce' );
+    $r = henkan_revert_batch( isset( $_POST['after_id'] ) ? absint( $_POST['after_id'] ) : 0, 50 );
+    if ( ! $r['more'] && ! empty( henkan_get_settings()['auto_clear_cache'] ) ) henkan_trigger_cache_clear();
+    wp_send_json_success( $r );
 }
