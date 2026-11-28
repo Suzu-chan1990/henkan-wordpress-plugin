@@ -2,6 +2,21 @@
 
 All notable changes to **Henkan - WebP & AVIF Converter** are documented in this file.
 
+## [2.6.3]
+### Compatibility
+* **Media offloading (Advanced Media Offloader):** Henkan now lists its WebP/AVIF/JXL files in the attachment metadata (`sources`, the format of Modern Image Formats). Advanced Media Offloader uploads them to the bucket together with the image (upload, bulk offload, WP-CLI) and deletes them again with "Mirror Delete". No change in the offload plugin is needed.
+* **`<picture>` for offloaded images:** Images served from the bucket/CDN get AVIF/WebP `<source>` elements with the bucket URL. Only files that were uploaded together with the image are listed, so an image offloaded before 2.6.3 keeps its JPEG/PNG instead of a broken link. Server rewrite rules cannot run on cloud storage: turn on "Frontend <picture>" (Henkan and Site Health show a notice).
+* **Convert first, then offload:** Images that are already offloaded are no longer converted or reverted, because the new files would only exist on the server. Convert your library with Henkan first, then run the bulk offload.
+* **Older conversions:** A one-time background job adds the `sources` entries to images converted by earlier versions (not yet offloaded ones), so a later bulk offload takes their WebP/AVIF files along.
+* **Integrity check:** No longer deletes the Henkan data of offloaded images whose local files were removed by the offload plugin.
+* Henkan does not write `sources` while Modern Image Formats is active (both would manage the same entries). New filters: `henkan_offloader_active`, `henkan_is_offloaded`, `henkan_write_sources`.
+
+## [2.6.2]
+### Compatibility
+* **More cache plugins:** "Auto clear cache" now also detects and purges Kyasshu, WP Fastest Cache, Cache Enabler, Breeze, SiteGround Speed Optimizer, Hummingbird, Comet Cache, Swift Performance, WP-Optimize, Nginx Helper and WP Engine (besides WP Rocket, W3 Total Cache, WP Super Cache, Autoptimize and LiteSpeed Cache). Each one is purged through its own public function or hook.
+* The dashboard shows every active cache plugin Henkan purges, not only the first one.
+* A cache plugin whose purge fails no longer stops the purge of the others (the error is written to the debug log when WP_DEBUG_LOG is on).
+
 ## [2.6.1]
 ### Fixes
 * **WebP quality settings:** New "WebP effort" (cwebp `-m`, 0-6) and "sharp colored edges" (cwebp `-sharp_yuv`) in General > Encoder. Effort 6 gives better quality at the same file size; sharp_yuv keeps colored lines and text crisp. Both make the conversion slower. Defaults (effort 2, sharp_yuv off) keep the previous output.

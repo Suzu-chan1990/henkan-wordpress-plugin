@@ -3,7 +3,7 @@ Contributors: Saguya
 Tags: webp, avif, image optimization, pagespeed, converter
 Requires at least: 7.1
 Tested up to: 7.2
-Stable tag: 2.6.1
+Stable tag: 2.6.3
 Requires PHP: 8.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -29,8 +29,9 @@ Most image optimizers rely on slow PHP processing or expensive cloud APIs with m
 * **Size Check:** Converted files that are not smaller than the original are dropped automatically.
 * **Undo:** Revert single images, a selection or everything – originals are never touched.
 * **Site Health:** Shows which converter works for each format and whether browsers really receive the optimized images.
-* **Cache Auto-Clear:** Fully compatible with WP Rocket, W3 Total Cache, Autoptimize, and LiteSpeed Cache. Conversions automatically trigger a cache purge.
+* **Cache Auto-Clear:** Works with WP Rocket, W3 Total Cache, WP Super Cache, Autoptimize, LiteSpeed Cache, Kyasshu, WP Fastest Cache, Cache Enabler, Breeze, SiteGround Speed Optimizer, Hummingbird, Comet Cache, Swift Performance, WP-Optimize, Nginx Helper and WP Engine. Conversions automatically trigger a cache purge.
 * **Frontend Delivery:** Automatically serves the optimized images to compatible browsers using modern HTML `<picture>` tags (post content and featured images) or Nginx/Apache rewrites.
+* **Media Offloading:** Works with Advanced Media Offloader (Amazon S3, Cloudflare R2, Backblaze B2, Wasabi, MinIO …): the WebP/AVIF files are offloaded with the image and delivered from the bucket with `<picture>`.
 * **WP-CLI Power:** Built-in commands (`wp henkan convert`, `revert`, `stats`, `repair`) for sysadmins to process massive libraries directly from the terminal without PHP timeouts.
 * **Global Ready:** 100% translation-ready. Shipped with English, German (`de_DE`), and Japanese (`ja`) out of the box.
 
@@ -75,9 +76,12 @@ Yes, as long as the original JPEG/PNG exists: use "Revert" in the media library 
 = Why was an image not converted ("Original kept")? =
 The converted file was not smaller than the original (this happens with small or already heavily compressed images). Henkan then keeps serving the original. You can turn this check off in General > Encoder.
 
+= Does Henkan work with media offloading (S3, R2, Backblaze B2)? =
+Yes, with Advanced Media Offloader. Henkan lists its WebP/AVIF files in the image metadata, and the offloader uploads and deletes them together with the image. Turn on "Frontend <picture>" in Advanced: rewrite rules cannot run on cloud storage. Convert your library with Henkan **before** offloading it; images that are already offloaded are not converted again.
+
 = Which hooks are available for developers? =
 Actions: `henkan_converted` ($id, $size_name, $file, $format, $source), `henkan_attachment_converted` ($id, $result), `henkan_reverted` ($id, $removed_files), `henkan_cache_cleared`.
-Filters: `henkan_quality` ($quality, $format, $size_name, $id, $source), `henkan_encoder_args` ($args, $method, $format, $source, $dest, $quality), `henkan_settings`, `henkan_picture_enabled`, `henkan_max_pixels`, `henkan_allow_custom_root`.
+Filters: `henkan_quality` ($quality, $format, $size_name, $id, $source), `henkan_encoder_args` ($args, $method, $format, $source, $dest, $quality), `henkan_settings`, `henkan_picture_enabled`, `henkan_max_pixels`, `henkan_allow_custom_root`, `henkan_offloader_active`, `henkan_is_offloaded` ($offloaded, $id), `henkan_write_sources`.
 
 == Screenshots ==
 
@@ -86,6 +90,19 @@ Filters: `henkan_quality` ($quality, $format, $size_name, $id, $source), `henkan
 3. Seamless integration into the WordPress Media Library.
 
 == Changelog ==
+
+= 2.6.3 =
+* **Media offloading (Advanced Media Offloader):** Henkan now lists its WebP/AVIF/JXL files in the attachment metadata (`sources`, the format of Modern Image Formats). Advanced Media Offloader uploads them to the bucket together with the image (upload, bulk offload, WP-CLI) and deletes them again with "Mirror Delete". No change in the offload plugin is needed.
+* **`<picture>` for offloaded images:** Images served from the bucket/CDN get AVIF/WebP `<source>` elements with the bucket URL. Only files that were uploaded together with the image are listed, so an image offloaded before 2.6.3 keeps its JPEG/PNG instead of a broken link. Server rewrite rules cannot run on cloud storage: turn on "Frontend <picture>" (Henkan and Site Health show a notice).
+* **Convert first, then offload:** Images that are already offloaded are no longer converted or reverted, because the new files would only exist on the server. Convert your library with Henkan first, then run the bulk offload.
+* **Older conversions:** A one-time background job adds the `sources` entries to images converted by earlier versions (not yet offloaded ones), so a later bulk offload takes their WebP/AVIF files along.
+* **Integrity check:** No longer deletes the Henkan data of offloaded images whose local files were removed by the offload plugin.
+* Henkan does not write `sources` while Modern Image Formats is active (both would manage the same entries). New filters: `henkan_offloader_active`, `henkan_is_offloaded`, `henkan_write_sources`.
+
+= 2.6.2 =
+* **More cache plugins:** "Auto clear cache" now also detects and purges Kyasshu, WP Fastest Cache, Cache Enabler, Breeze, SiteGround Speed Optimizer, Hummingbird, Comet Cache, Swift Performance, WP-Optimize, Nginx Helper and WP Engine (besides WP Rocket, W3 Total Cache, WP Super Cache, Autoptimize and LiteSpeed Cache). Each one is purged through its own public function or hook.
+* The dashboard shows every active cache plugin Henkan purges, not only the first one.
+* A cache plugin whose purge fails no longer stops the purge of the others (the error is written to the debug log when WP_DEBUG_LOG is on).
 
 = 2.6.1 =
 * **WebP quality settings:** New "WebP effort" (cwebp `-m`, 0-6) and "sharp colored edges" (cwebp `-sharp_yuv`) in General > Encoder. Effort 6 gives better quality at the same file size; sharp_yuv keeps colored lines and text crisp. Both make the conversion slower. Defaults (effort 2, sharp_yuv off) keep the previous output.

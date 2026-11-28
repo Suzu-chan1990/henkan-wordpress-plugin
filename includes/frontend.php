@@ -82,7 +82,10 @@ function henkan_build_picture($img, $id = 0) {
     if (!preg_match('/\.(jpe?g|png)$/i', $src)) return $img;
 
     $upload = wp_get_upload_dir();
-    if (empty($upload['baseurl']) || strpos($src, $upload['baseurl']) !== 0) return $img;
+    if (empty($upload['baseurl']) || strpos($src, $upload['baseurl']) !== 0) {
+        // Not a local URL: maybe an image of an offload plugin (bucket/CDN URL)
+        return henkan_build_picture_offloaded($img, $id, $src);
+    }
 
     // Only media-library images. WordPress inserts sized URLs (image-1024x576.jpg), which
     // attachment_url_to_postid() does not know, so use the wp-image-ID class or the full-size URL.
@@ -121,6 +124,58 @@ function henkan_build_picture($img, $id = 0) {
             $path = $upload['basedir'] . $rel . '.' . $fmt;
             // Only list files that really exist (otherwise the browser shows a broken image)
             if (!file_exists($path) || filesize($path) <= 0) continue;
+            $set[] = esc_url(preg_replace('/\.[^.\/]+$/', '', $url) . '.' . $fmt) . ($descriptor !== '' ? ' ' . esc_attr($descriptor) : '');
+        }
+        if (empty($set)) continue;
+        $sources .= '<source srcset="' . implode(', ', $set) . '"' . ($sizes !== '' ? ' sizes="' . esc_attr($sizes) . '"' : '') . ' type="image/' . $fmt . '">';
+    }
+
+    if (empty($sources)) return $img;
+    return "<picture>$sources$img</picture>";
+}
+
+/**
+ * <picture> for an image whose files were offloaded to cloud storage (bucket/CDN URL).
+ * The local files may be gone, so the converted files are taken from the Henkan data and their
+ * URLs are the image URLs with the new extension (the offload plugin stores them side by side).
+ *
+ * @param string $img <img> tag.
+ * @param int    $id  Attachment ID if known (0 = detect from the wp-image-ID class).
+ * @param string $src src without query string.
+ */
+function henkan_build_picture_offloaded($img, $id, $src) {
+    if (!function_exists('henkan_is_offloaded') || !henkan_offloader_active()) return $img;
+    $id = (int) $id;
+    if (!$id && preg_match('/\bwp-image-(\d+)\b/', henkan_img_attr($img, 'class'), $cm)) $id = (int) $cm[1];
+    if (!$id || !henkan_is_offloaded($id)) return $img;
+
+    $names = henkan_converted_names($id);
+    if (empty($names)) return $img;
+
+    $candidates = [];
+    $srcset = henkan_img_attr($img, 'srcset');
+    if ($srcset !== '') {
+        foreach (explode(',', $srcset) as $part) {
+            $part = trim($part);
+            if ($part === '') continue;
+            $bits = preg_split('/\s+/', $part, 2);
+            $candidates[] = [strtok($bits[0], '?#'), isset($bits[1]) ? trim($bits[1]) : ''];
+        }
+    }
+    if (empty($candidates)) $candidates[] = [$src, ''];
+
+    $settings = henkan_get_settings();
+    $sizes    = henkan_img_attr($img, 'sizes');
+    $sources  = '';
+    foreach (['avif' => 'enable_avif', 'webp' => 'enable_webp', 'jxl' => 'enable_jxl'] as $fmt => $opt) {
+        if (empty($settings[$opt])) continue;
+        $set = [];
+        foreach ($candidates as $c) {
+            list($url, $descriptor) = $c;
+            if (!preg_match('#^https?://#i', $url) || !preg_match('/\.(jpe?g|png)$/i', $url)) continue;
+            $name = pathinfo(wp_parse_url($url, PHP_URL_PATH) ?: '', PATHINFO_FILENAME) . '.' . $fmt;
+            // Only files Henkan really created for this attachment (otherwise the browser shows a broken image)
+            if (!isset($names[rawurldecode($name)]) && !isset($names[$name])) continue;
             $set[] = esc_url(preg_replace('/\.[^.\/]+$/', '', $url) . '.' . $fmt) . ($descriptor !== '' ? ' ' . esc_attr($descriptor) : '');
         }
         if (empty($set)) continue;

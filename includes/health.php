@@ -82,6 +82,14 @@ function henkan_health_test_delivery() {
         'test'        => 'henkan_delivery',
     ];
 
+    // Offloaded images are served from the bucket/CDN, where server rewrite rules cannot run
+    if ( henkan_offloader_active() && empty( $s['picture_filter_enabled'] ) ) {
+        $result['status']      = 'recommended';
+        $result['label']       = __( 'Offloaded images get no AVIF/WebP', 'henkan-webp-avif-converter' );
+        $result['description'] = '<p>' . esc_html__( 'Advanced Media Offloader is active. Images in cloud storage can only be delivered as AVIF/WebP with <picture>. Enable "Frontend <picture>" in the Henkan settings.', 'henkan-webp-avif-converter' ) . '</p>';
+        return $result;
+    }
+
     $rewrite = henkan_health_rewrite_probe();
 
     if ( ! empty( $s['picture_filter_enabled'] ) ) {

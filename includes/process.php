@@ -75,6 +75,9 @@ function henkan_handle_upload( $metadata, $attachment_id ) {
         }
     }
 
+    // List the converted files for offload plugins (uploaded with the attachment right after this)
+    $metadata = henkan_sources_meta( $metadata, (int) $attachment_id );
+
     do_action( 'henkan_attachment_converted', (int) $attachment_id, $res );
     if ( ! empty( $settings['auto_clear_cache'] ) ) henkan_trigger_cache_clear();
 
@@ -707,6 +710,10 @@ function henkan_convert_file( $path, $id, $size_name, $update_db = true, $qualit
 function henkan_convert_attachment( $id, $args = [] ) {
     $args = wp_parse_args( $args, [ 'force' => false, 'quality' => 0 ] );
     $id   = (int) $id;
+    if ( henkan_is_offloaded( $id ) ) {
+        // New files would only exist locally, while the image is delivered from the bucket
+        return [ 'success' => false, 'generated' => [], 'failed' => [ 'already offloaded to cloud storage, convert before offloading' ], 'skipped' => [] ];
+    }
     $file = get_attached_file( $id );
     if ( ! $file || ! file_exists( $file ) ) {
         return [ 'success' => false, 'generated' => [], 'failed' => [ 'file missing' ], 'skipped' => [] ];
@@ -730,6 +737,7 @@ function henkan_convert_attachment( $id, $args = [] ) {
             henkan_convert_file( $base . '/' . $data['file'], $id, $size, true, (int) $args['quality'] );
         }
     }
+    henkan_sync_sources( $id );
 
     /**
      * Fires after an attachment (main file and sizes) was converted.
@@ -812,6 +820,10 @@ function henkan_remove_converted_files( $id ) {
  */
 function henkan_revert_attachment( $id ) {
     $id = (int) $id;
+    if ( henkan_is_offloaded( $id ) ) {
+        // The converted files are in the bucket; deleting only the local copies would break <picture>
+        return [ 'ok' => false, 'removed' => 0, 'msg' => __( 'Not reverted: the image is offloaded to cloud storage.', 'henkan-webp-avif-converter' ) ];
+    }
     if ( ! henkan_attachment_has_original( $id ) ) {
         return [ 'ok' => false, 'removed' => 0, 'msg' => __( 'Not reverted: the original JPEG/PNG no longer exists.', 'henkan-webp-avif-converter' ) ];
     }
@@ -821,6 +833,7 @@ function henkan_revert_attachment( $id ) {
     delete_post_meta( $id, '_henkan_state' );
     delete_post_meta( $id, 'henkan_last_error' );
     henkan_add_savings( -$r['bytes_saved'] );
+    henkan_sync_sources( $id ); // removes Henkan's "sources" entries
 
     /**
      * Fires after the converted files of an attachment were removed.
@@ -881,14 +894,105 @@ add_action( 'delete_post', function( $pid ) {
     $wpdb->delete( $wpdb->prefix . 'henkan_data', ['attachment_id' => $pid] );
 });
 
+/**
+ * Known page cache plugins: name => [ detect callback, purge callback ].
+ * Every entry only uses the public purge function or hook of that plugin.
+ */
+function henkan_cache_plugins() {
+    return [
+        'WP Rocket'           => [
+            static fn() => function_exists( 'rocket_clean_domain' ),
+            static function () { rocket_clean_domain(); },
+        ],
+        'W3 Total Cache'      => [
+            static fn() => function_exists( 'w3tc_flush_all' ),
+            static function () { w3tc_flush_all(); },
+        ],
+        'WP Super Cache'      => [
+            static fn() => function_exists( 'wp_cache_clear_cache' ),
+            static function () { wp_cache_clear_cache(); },
+        ],
+        'Autoptimize'         => [
+            static fn() => class_exists( 'autoptimizeCache' ),
+            static function () { autoptimizeCache::clearall(); },
+        ],
+        // LiteSpeed Cache 3+: public purge hook; the old LiteSpeed_Cache_API class only for old versions
+        'LiteSpeed Cache'     => [
+            static fn() => has_action( 'litespeed_purge_all' ) || class_exists( 'LiteSpeed_Cache_API' ),
+            static function () {
+                if ( has_action( 'litespeed_purge_all' ) ) do_action( 'litespeed_purge_all' );
+                elseif ( method_exists( 'LiteSpeed_Cache_API', 'purge_all' ) ) LiteSpeed_Cache_API::purge_all();
+            },
+        ],
+        'Kyasshu'             => [
+            static fn() => function_exists( 'kyasshu_purge_all' ),
+            static function () { do_action( 'kyasshu_flush' ); },
+        ],
+        'WP Fastest Cache'    => [
+            static fn() => function_exists( 'wpfc_clear_all_cache' ),
+            static function () { wpfc_clear_all_cache( true ); },
+        ],
+        'Cache Enabler'       => [
+            static fn() => class_exists( 'Cache_Enabler' ),
+            static function () { do_action( 'cache_enabler_clear_complete_cache' ); },
+        ],
+        'Breeze'              => [
+            static fn() => defined( 'BREEZE_VERSION' ),
+            static function () { do_action( 'breeze_clear_all_cache' ); },
+        ],
+        'SiteGround Speed Optimizer' => [
+            static fn() => function_exists( 'sg_cachepress_purge_cache' ),
+            static function () { sg_cachepress_purge_cache(); },
+        ],
+        'Hummingbird'         => [
+            static fn() => defined( 'WPHB_VERSION' ),
+            static function () { do_action( 'wphb_clear_page_cache' ); },
+        ],
+        'Comet Cache'         => [
+            static fn() => class_exists( 'comet_cache' ) && method_exists( 'comet_cache', 'clear' ),
+            static function () { comet_cache::clear(); },
+        ],
+        'Swift Performance'   => [
+            static fn() => class_exists( 'Swift_Performance_Cache' ) && method_exists( 'Swift_Performance_Cache', 'clear_all_cache' ),
+            static function () { Swift_Performance_Cache::clear_all_cache(); },
+        ],
+        'WP-Optimize'         => [
+            static fn() => function_exists( 'wpo_cache_flush' ),
+            static function () { wpo_cache_flush(); },
+        ],
+        'Nginx Helper'        => [
+            static fn() => has_action( 'rt_nginx_helper_purge_all' ),
+            static function () { do_action( 'rt_nginx_helper_purge_all' ); },
+        ],
+        'WP Engine'           => [
+            static fn() => class_exists( 'WpeCommon' ),
+            static function () {
+                if ( method_exists( 'WpeCommon', 'purge_memcached' ) ) WpeCommon::purge_memcached();
+                if ( method_exists( 'WpeCommon', 'purge_varnish_cache' ) ) WpeCommon::purge_varnish_cache();
+            },
+        ],
+    ];
+}
+
+// Names of the active cache plugins Henkan can purge.
+function henkan_active_cache_plugins() {
+    $active = [];
+    foreach ( henkan_cache_plugins() as $name => $plugin ) {
+        if ( ( $plugin[0] )() ) $active[] = $name;
+    }
+    return $active;
+}
+
 function henkan_trigger_cache_clear() {
-    if ( function_exists( 'rocket_clean_domain' ) ) rocket_clean_domain();
-    if ( function_exists( 'w3tc_flush_all' ) ) w3tc_flush_all();
-    if ( function_exists( 'wp_cache_clear_cache' ) ) wp_cache_clear_cache();
-    if ( class_exists( 'autoptimizeCache' ) ) autoptimizeCache::clearall();
-    // LiteSpeed Cache 3+: public purge hook; the old LiteSpeed_Cache_API class only for old versions
-    if ( has_action( 'litespeed_purge_all' ) ) do_action( 'litespeed_purge_all' );
-    elseif ( class_exists( 'LiteSpeed_Cache_API' ) && method_exists( 'LiteSpeed_Cache_API', 'purge_all' ) ) LiteSpeed_Cache_API::purge_all();
+    foreach ( henkan_cache_plugins() as $name => $plugin ) {
+        if ( ! ( $plugin[0] )() ) continue;
+        try {
+            ( $plugin[1] )();
+        } catch ( \Throwable $e ) {
+            // One failing cache plugin must not stop the others
+            if ( defined( 'WP_DEBUG_LOG' ) && WP_DEBUG_LOG ) error_log( 'Henkan: cache purge failed for ' . $name . ': ' . $e->getMessage() ); // phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_error_log -- debug log only
+        }
+    }
     /** Fires after Henkan purged the page caches (for other cache plugins / CDNs). */
     do_action( 'henkan_cache_cleared' );
 }
@@ -901,6 +1005,7 @@ function henkan_trigger_cache_clear() {
  * @return bool True if the metadata was changed.
  */
 function henkan_repair_attachment_metadata( $id ) {
+    if ( henkan_is_offloaded( $id ) ) return false; // local files may be gone on purpose
     $file = get_attached_file( $id );
     $meta = wp_get_attachment_metadata( $id );
     if ( ! $file || ! is_array( $meta ) ) return false;

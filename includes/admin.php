@@ -263,13 +263,10 @@ function henkan_get_stats() {
     return [ 'total' => $total, 'converted' => $converted, 'remaining' => max( 0, $total - $converted ), 'percent' => $percent ];
 }
 
+// Active cache plugins as one label (e.g. "Kyasshu" or "Kyasshu, Autoptimize"), false when none.
 function henkan_detect_cache_plugin() {
-    if ( function_exists( 'rocket_clean_domain' ) ) return 'WP Rocket';
-    if ( function_exists( 'w3tc_flush_all' ) ) return 'W3 Total Cache';
-    if ( function_exists( 'wp_cache_clear_cache' ) ) return 'WP Super Cache';
-    if ( class_exists( 'autoptimizeCache' ) ) return 'Autoptimize';
-    if ( has_action( 'litespeed_purge_all' ) || class_exists( 'LiteSpeed_Cache_API' ) ) return 'LiteSpeed Cache';
-    return false;
+    $active = henkan_active_cache_plugins();
+    return $active ? implode( ', ', $active ) : false;
 }
 
 function henkan_get_server_info() {
@@ -327,6 +324,7 @@ function henkan_admin_page() {
 
         <?php // Admin notices are moved below the first h1 by WordPress; keep it below the header ?>
         <h1 class="hk-screen-title"><?php esc_html_e( 'Henkan', 'henkan-webp-avif-converter' ); ?></h1>
+        <?php henkan_offload_admin_notice(); ?>
 
         <div class="hk-stats">
             <div class="hk-stat">

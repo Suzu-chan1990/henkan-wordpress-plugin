@@ -2,7 +2,8 @@
 /**
  * Henkan uninstall: removes the plugin's own table, options, post meta and cron events.
  * Converted image files (WebP/AVIF/JXL) are NOT deleted: posts may link to them, and with
- * "Keep original" off they are the only copy of an image.
+ * "Keep original" off they are the only copy of an image. Their "sources" entries in the
+ * attachment metadata stay for the same reason (offload plugins still need them).
  */
 defined( 'WP_UNINSTALL_PLUGIN' ) || exit;
 
@@ -15,6 +16,7 @@ function henkan_uninstall_site() {
         'henkan_settings', 'henkan_db_version', 'henkan_db_reset_v211', 'henkan_background_queue',
         'henkan_background_worker_lock', 'henkan_integrity_lock', 'henkan_integrity_last_run',
         'henkan_integrity_missing_count', 'henkan_metadata_repair', 'henkan_total_savings_bytes',
+        'henkan_sources_backfill',
     ] as $opt ) {
         delete_option( $opt );
     }
@@ -25,7 +27,7 @@ function henkan_uninstall_site() {
     delete_post_meta_by_key( 'henkan_last_error' );
     delete_post_meta_by_key( '_henkan_skipped' );
 
-    foreach ( [ 'henkan_integrity_check_event', 'henkan_background_worker_event', 'henkan_repair_metadata_event' ] as $hook ) {
+    foreach ( [ 'henkan_integrity_check_event', 'henkan_background_worker_event', 'henkan_repair_metadata_event', 'henkan_sources_backfill_event' ] as $hook ) {
         wp_clear_scheduled_hook( $hook );
     }
 }

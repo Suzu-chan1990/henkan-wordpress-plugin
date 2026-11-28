@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Henkan - WebP & AVIF Converter
  * Description: Professional Image Optimization: Smart-Scan, WP-CLI, Lazy-Loading and Cache Clearing.
- * Version: 2.6.1
+ * Version: 2.6.3
  * Author: Saguya
  * Text Domain: henkan-webp-avif-converter
  * Domain Path: /languages
@@ -16,7 +16,7 @@ defined( 'ABSPATH' ) || exit;
 
 define( 'HENKAN_PATH', plugin_dir_path( __FILE__ ) );
 define( 'HENKAN_URL', plugin_dir_url( __FILE__ ) );
-define( 'HENKAN_VERSION', '2.6.1' );
+define( 'HENKAN_VERSION', '2.6.3' );
 
 // ABSOLUTELY NO FORMAT IS ACTIVE BY DEFAULT
 function henkan_default_settings() {
@@ -130,6 +130,8 @@ function henkan_run_integrity_check() {
 
         foreach ( $rows as $row ) {
             $last_id = (int) $row['attachment_id'];
+        // Offloaded images may have no local files left; their converted files live in the bucket
+        if ( henkan_is_offloaded( $last_id ) ) continue;
         $data = henkan_decode_data( $row['data'] );
         if ( ! is_array( $data ) ) continue;
 
@@ -214,6 +216,7 @@ function henkan_init_plugin() {
         update_option( 'henkan_db_reset_v211', 1 );
     }
 
+    require_once HENKAN_PATH . 'includes/offload.php';
     require_once HENKAN_PATH . 'includes/process.php';
     require_once HENKAN_PATH . 'includes/admin.php';
     require_once HENKAN_PATH . 'includes/health.php';
@@ -390,6 +393,8 @@ function henkan_get_data( $id ) {
 
 function henkan_attachment_needs_conversion( $id, $settings = null ) {
     $settings = is_array( $settings ) ? $settings : henkan_get_settings();
+    // Already in cloud storage: new files would not be offloaded (convert first, then offload)
+    if ( henkan_is_offloaded( $id ) ) return false;
     $file = get_attached_file( $id );
     if ( ! $file || ! file_exists( $file ) ) return false;
 
@@ -529,6 +534,14 @@ add_action( 'init', function() {
     }
 } );
 
+// One-time background job: list converted files of older conversions for offload plugins (see offload.php)
+add_action( 'init', function() {
+    if ( get_option( 'henkan_sources_backfill' ) === false && ! wp_next_scheduled( 'henkan_sources_backfill_event' ) ) {
+        add_option( 'henkan_sources_backfill', [ 'last_id' => 0, 'updated' => 0 ], '', false );
+        wp_schedule_single_event( time() + 60, 'henkan_sources_backfill_event' );
+    }
+} );
+
 // Schedule the integrity cron also when the option is created for the first time
 add_action( 'add_option_henkan_settings', function( $option, $value ) {
     henkan_update_integrity_cron( [], $value );
@@ -539,4 +552,5 @@ register_deactivation_hook( __FILE__, function() {
     wp_clear_scheduled_hook( 'henkan_integrity_check_event' );
     wp_clear_scheduled_hook( 'henkan_background_worker_event' );
     wp_clear_scheduled_hook( 'henkan_repair_metadata_event' );
+    wp_clear_scheduled_hook( 'henkan_sources_backfill_event' );
 } );
